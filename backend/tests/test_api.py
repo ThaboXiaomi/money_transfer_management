@@ -32,4 +32,4 @@ def test_register_login_and_transfer():
         }, files={'file':('dummy.txt', f, 'text/plain')})
     assert r.status_code == 200
     j = r.json()
-assert 'id' in j
+    assert 'id' in j

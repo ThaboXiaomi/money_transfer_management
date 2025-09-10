@@ -31,3 +31,14 @@ flutter run
 ```
 
 Set `lib/services/config.dart` `backendBase` to `http://10.0.2.2:8000` for Android emulator or to `http://localhost:8000` for desktop/iOS simulator.
+
+## App launcher icons
+
+This project uses `assets/logo.jpg` as the app launcher icon for Android and iOS.
+
+To regenerate the icons after changing `assets/logo.jpg`, run:
+
+```powershell
+flutter pub get
+flutter pub run flutter_launcher_icons:main
+```

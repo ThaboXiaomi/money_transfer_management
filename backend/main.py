@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -27,6 +28,28 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 app = FastAPI(title='Money Transfer Backend')
 app.mount('/uploads', StaticFiles(directory=UPLOAD_DIR), name='uploads')
+
+# Optional static assets (serve a favicon)
+STATIC_DIR = os.path.join(BASE_DIR, 'static')
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+@app.get('/')
+def root():
+    return {'status': 'ok'}
+
+
+@app.get('/favicon.ico')
+def favicon():
+    # Try serving the app logo from the Flutter assets folder as favicon.
+    logo_path = os.path.join(BASE_DIR, '..', 'assets', 'logo.jpg')
+    logo_path = os.path.normpath(logo_path)
+    if os.path.exists(logo_path):
+        return FileResponse(logo_path, media_type='image/jpeg')
+    # fallback to static/favicon.ico if present
+    fav_path = os.path.join(STATIC_DIR, 'favicon.ico')
+    if os.path.exists(fav_path):
+        return FileResponse(fav_path, media_type='image/x-icon')
+    raise HTTPException(status_code=404, detail='favicon not found')
 
 # CORS - allow requests from local dev servers / Flutter web during development
 app.add_middleware(
@@ -68,6 +91,19 @@ def init_db():
         destination TEXT,
         txRef TEXT,
         created_at TEXT
+    )
+    ''')
+    conn.execute('''
+    CREATE TABLE IF NOT EXISTS recipients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ownerId TEXT,
+        name TEXT,
+        phone TEXT,
+        country TEXT,
+        bankName TEXT,
+        bankAccount TEXT,
+        iban TEXT,
+        address TEXT
     )
     ''')
     # ensure there is an admin user (default password: admin)
@@ -195,6 +231,65 @@ def list_transfers(current_user=Depends(get_current_user)):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.get('/recipients')
+def list_recipients(current_user=Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM recipients ORDER BY id DESC')
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post('/recipients')
+def create_recipient(
+    ownerId: str = Form(...),
+    name: str = Form(...),
+    phone: str = Form(...),
+    country: str = Form(...),
+    bankName: Optional[str] = Form(None),
+    bankAccount: Optional[str] = Form(None),
+    iban: Optional[str] = Form(None),
+    address: Optional[str] = Form(None),
+    current_user=Depends(get_current_user),
+):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO recipients (ownerId,name,phone,country,bankName,bankAccount,iban,address) VALUES (?,?,?,?,?,?,?,?)',
+        (ownerId, name, phone, country, bankName or '', bankAccount or '', iban or '', address or ''),
+    )
+    conn.commit()
+    id_ = cur.lastrowid
+    conn.close()
+    return {'id': id_}
+
+
+@app.get('/dashboard')
+def dashboard_summary(current_user=Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) as total FROM transfers")
+    total = cur.fetchone()['total']
+    cur.execute("SELECT COUNT(*) as pending FROM transfers WHERE status = 'pending'")
+    pending = cur.fetchone()['pending']
+    cur.execute("SELECT COUNT(*) as completed FROM transfers WHERE status = 'sent'")
+    completed = cur.fetchone()['completed']
+    cur.execute("SELECT COALESCE(SUM(amount),0) as total_volume FROM transfers")
+    total_volume = cur.fetchone()['total_volume']
+    cur.execute("SELECT COALESCE(SUM(charge),0) as total_fees FROM transfers")
+    total_fees = cur.fetchone()['total_fees']
+    conn.close()
+    return {
+        'totalTransfers': total,
+        'pending': pending,
+        'completed': completed,
+        'totalVolume': total_volume,
+        'totalFees': total_fees,
+        'since': datetime.utcnow().isoformat(),
+    }
 
 
 @app.post('/transfers/{transfer_id}/mark_sent')

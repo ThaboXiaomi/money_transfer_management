@@ -54,6 +54,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
 
+  # Launcher icon generator for Android & iOS from a single image
+  flutter_launcher_icons: ^0.11.0
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -67,6 +70,19 @@ flutter:
 
   assets:
   - assets/logo.jpg
+
+# Configuration for flutter_launcher_icons. Run:
+# flutter pub get ; flutter pub run flutter_launcher_icons:main
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.jpg"
+  android_adaptive_icon: true
+  # Use a plain white background so the logo foreground is visible on all shapes.
+  adaptive_icon_background: "#ffffff"
+  # Use the same image as the adaptive foreground (the generator will center/crop as needed).
+  adaptive_icon_foreground: "assets/logo.jpg"
+
 
   # To add assets to your application, add an assets section, like this:
   # assets:
