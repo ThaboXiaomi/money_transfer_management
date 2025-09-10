@@ -1,0 +1,34 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv; . .venv/bin/activate
+          pip install -r backend/requirements.txt
+      - name: Run backend tests
+        run: |
+          . .venv/bin/activate
+          pytest -q backend/tests
+
+  flutter-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Install packages
+        run: flutter pub get
+      - name: Run flutter tests
+        run: flutter test --coverage

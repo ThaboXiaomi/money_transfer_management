@@ -1,0 +1,1 @@
+Place your logo image file here as `logo.jpg` (for example, use the provided image attachment). The app references `assets/logo.jpg` in the Role Selection screen. Ensure the file is checked into source control.
