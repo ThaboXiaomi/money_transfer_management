@@ -54,11 +54,35 @@ def favicon():
 # CORS - allow requests from local dev servers / Flutter web during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # change to specific origins in production
+    # Allow common development origins (localhost, 127.0.0.1, Android emulator 10.0.2.2)
+    allow_origins=[],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$",
+    # You can switch to allow_origins=['https://yourdomain.com'] in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware('http')
+async def log_requests(request, call_next):
+    # Simple request logger to help debugging connectivity/CORS issues
+    try:
+        print(f"[REQ] {request.method} {request.url}")
+    except Exception:
+        pass
+    response = await call_next(request)
+    try:
+        print(f"[RESP] {request.method} {request.url} -> {response.status_code}")
+    except Exception:
+        pass
+    return response
+
+
+@app.get('/ping')
+def ping(origin: Optional[str] = None):
+    # convenience endpoint for frontend to verify connectivity
+    return {'ok': True, 'time': datetime.utcnow().isoformat(), 'note': 'pong'}
 
 
 def get_conn():
