@@ -18,7 +18,12 @@ class LocalDb {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
   }
 
   Future _createDB(Database db, int version) async {
@@ -26,15 +31,119 @@ class LocalDb {
       CREATE TABLE transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         agentName TEXT,
+        agentId TEXT,
         senderNumber TEXT,
         receiverNumber TEXT,
         amount REAL,
         charge REAL,
         agentFee REAL,
         screenshotPath TEXT,
-        status TEXT
+        status TEXT,
+        txRef TEXT,
+        destination TEXT
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        locationId TEXT,
+        status TEXT,
+        dailyVolume REAL,
+        commissionRate REAL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE recipients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        number TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        role TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT,
+        meta TEXT,
+        created_at TEXT
+      )
+    ''');
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // add agents table and agentId column to transfers
+      try {
+        await db.execute('ALTER TABLE transfers ADD COLUMN agentId TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          locationId TEXT,
+          status TEXT,
+          dailyVolume REAL,
+          commissionRate REAL
+        )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS recipients (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT,
+          number TEXT
+        )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT,
+          role TEXT
+        )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS audit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action TEXT,
+          meta TEXT,
+          created_at TEXT
+        )
+        ''');
+      } catch (_) {}
+    }
+  }
+
+  // Agents CRUD helpers
+  Future<void> upsertAgent(Map<String, dynamic> a) async {
+    final db = await instance.database;
+    await db.insert('agents', a, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Map<String, dynamic>>> readAgents() async {
+    final db = await instance.database;
+    return await db.query('agents');
+  }
+
+  Future<void> deleteAgentById(String id) async {
+    final db = await instance.database;
+    await db.delete('agents', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<Transfer> createTransfer(Transfer t) async {
@@ -43,6 +152,7 @@ class LocalDb {
     return Transfer(
       id: id,
       agentName: t.agentName,
+      agentId: (t as dynamic).agentId,
       senderNumber: t.senderNumber,
       receiverNumber: t.receiverNumber,
       amount: t.amount,
@@ -50,6 +160,8 @@ class LocalDb {
       agentFee: t.agentFee,
       screenshotPath: t.screenshotPath,
       status: t.status,
+      txRef: t.txRef,
+      destination: t.destination,
     );
   }
 

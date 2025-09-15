@@ -165,7 +165,7 @@ class _AgentScreenState extends State<AgentScreen> {
                               'Charge',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            Text('${charge.toStringAsFixed(2)} R'),
+                            Text(AppConfig.formatCurrency(charge)),
                           ],
                         ),
                         Column(
@@ -175,7 +175,7 @@ class _AgentScreenState extends State<AgentScreen> {
                               'Agent fee (30%)',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            Text('${agentFee.toStringAsFixed(2)} R'),
+                            Text(AppConfig.formatCurrency(agentFee)),
                           ],
                         ),
                         Column(
@@ -185,7 +185,7 @@ class _AgentScreenState extends State<AgentScreen> {
                               'Total Payable',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            Text('${(amt + charge).toStringAsFixed(2)} R'),
+                            Text(AppConfig.formatCurrency(amt + charge)),
                           ],
                         ),
                       ],

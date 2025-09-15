@@ -14,6 +14,10 @@ class AppInit {
     }
 
     await AppConfig.init(port: port);
+    // load persisted settings (currency etc.) if present
+    try {
+      await AppConfig.load();
+    } catch (_) {}
     debugPrint('AppConfig.backendBase -> ${AppConfig.backendBase}');
   }
 

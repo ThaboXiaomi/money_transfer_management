@@ -15,6 +15,9 @@ class ApiService {
     final uri = Uri.parse('${AppConfig.backendBase}/transfers');
     final request = http.MultipartRequest('POST', uri);
     request.fields['agentName'] = t.agentName;
+    if ((t as dynamic).agentId != null && (t as dynamic).agentId != '') {
+      request.fields['agentId'] = (t as dynamic).agentId;
+    }
     request.fields['senderNumber'] = t.senderNumber;
     request.fields['receiverNumber'] = t.receiverNumber;
     request.fields['amount'] = t.amount.toString();
@@ -22,9 +25,13 @@ class ApiService {
     request.fields['agentFee'] = t.agentFee.toString();
     if (destination.isNotEmpty) request.fields['destination'] = destination;
     if (txRef.isNotEmpty) request.fields['txRef'] = txRef;
-    request.files.add(
-      await http.MultipartFile.fromPath('file', t.screenshotPath),
-    );
+    if (t.screenshotPath.isNotEmpty) {
+      try {
+        request.files.add(
+          await http.MultipartFile.fromPath('file', t.screenshotPath),
+        );
+      } catch (_) {}
+    }
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt');
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
@@ -92,5 +99,33 @@ class ApiService {
       return;
     }
     throw Exception('Register failed: ${resp.statusCode} ${resp.body}');
+  }
+
+  // best-effort helper used by the exchange rates manager UI; backend may not
+  // expose a /rates endpoint so caller should ignore failures.
+  static Future<void> _postRate(String pair, double rate) async {
+    final uri = Uri.parse('${AppConfig.backendBase}/rates');
+    final resp = await http.post(
+      uri,
+      body: {'pair': pair, 'rate': rate.toString()},
+    );
+    if (resp.statusCode >= 200 && resp.statusCode < 300) return;
+    throw Exception('Post rate failed: ${resp.statusCode}');
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchUsers() async {
+    // best-effort: if backend exposes /users fetch, else return empty
+    try {
+      final uri = Uri.parse('${AppConfig.backendBase}/users');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwt');
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
+      final resp = await http.get(uri, headers: headers);
+      if (resp.statusCode == 200) {
+        final list = json.decode(resp.body) as List<dynamic>;
+        return list.cast<Map<String, dynamic>>();
+      }
+    } catch (_) {}
+    return [];
   }
 }
