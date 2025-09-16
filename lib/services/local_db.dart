@@ -79,6 +79,14 @@ class LocalDb {
         created_at TEXT
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        body TEXT
+      )
+    ''');
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -127,7 +135,47 @@ class LocalDb {
         )
         ''');
       } catch (_) {}
+      try {
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT,
+          body TEXT
+        )
+        ''');
+      } catch (_) {}
     }
+  }
+
+  // Audit helper
+  Future<void> logAudit(String action, String meta) async {
+    final db = await instance.database;
+    await db.insert('audit', {
+      'action': action,
+      'meta': meta,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // Notifications CRUD
+  Future<int> insertNotification(Map<String, dynamic> n) async {
+    final db = await instance.database;
+    return await db.insert('notifications', n);
+  }
+
+  Future<List<Map<String, dynamic>>> readNotifications() async {
+    final db = await instance.database;
+    return await db.query('notifications', orderBy: 'id DESC');
+  }
+
+  Future<void> updateNotification(int id, Map<String, dynamic> n) async {
+    final db = await instance.database;
+    await db.update('notifications', n, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteNotification(int id) async {
+    final db = await instance.database;
+    await db.delete('notifications', where: 'id = ?', whereArgs: [id]);
   }
 
   // Agents CRUD helpers

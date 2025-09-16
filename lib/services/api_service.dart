@@ -98,7 +98,25 @@ class ApiService {
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       return;
     }
+    // try to surface backend detail if present
+    try {
+      final m = json.decode(resp.body) as Map<String, dynamic>;
+      if (m.containsKey('detail'))
+        throw Exception('Register failed: ${m['detail']}');
+    } catch (_) {}
     throw Exception('Register failed: ${resp.statusCode} ${resp.body}');
+  }
+
+  static Future<double?> passwordStrength(String password) async {
+    try {
+      final uri = Uri.parse('${AppConfig.backendBase}/password_strength');
+      final resp = await http.post(uri, body: {'password': password});
+      if (resp.statusCode == 200) {
+        final m = json.decode(resp.body) as Map<String, dynamic>;
+        return (m['strength'] as num).toDouble();
+      }
+    } catch (_) {}
+    return null;
   }
 
   // best-effort helper used by the exchange rates manager UI; backend may not

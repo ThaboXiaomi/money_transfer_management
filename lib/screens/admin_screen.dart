@@ -263,6 +263,10 @@ class _AdminScreenState extends State<AdminScreen>
                                             content: Text('Marked sent'),
                                           ),
                                         );
+                                        await LocalDb.instance.logAudit(
+                                          'transfer_marked_sent',
+                                          t.id.toString(),
+                                        );
                                         setState(() => _load());
                                       } else {
                                         ScaffoldMessenger.of(
@@ -290,6 +294,10 @@ class _AdminScreenState extends State<AdminScreen>
                                         const SnackBar(
                                           content: Text('Marked sent locally'),
                                         ),
+                                      );
+                                      await LocalDb.instance.logAudit(
+                                        'transfer_marked_sent',
+                                        t.id.toString(),
                                       );
                                       setState(() => _load());
                                     }
@@ -440,6 +448,44 @@ class _AdminScreenState extends State<AdminScreen>
                         child: const Text('Reset'),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Security',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Minimum password strength: ${AppConfig.passwordMinStrength.toStringAsFixed(2)}',
+                          ),
+                          Slider(
+                            min: 0.0,
+                            max: 1.0,
+                            divisions: 10,
+                            value: AppConfig.passwordMinStrength,
+                            label: AppConfig.passwordMinStrength
+                                .toStringAsFixed(2),
+                            onChanged: (v) {
+                              AppConfig.passwordMinStrength = v;
+                              setState(() {});
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Higher values require stronger passwords for registration.',
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -594,12 +640,20 @@ class _AdminScreenState extends State<AdminScreen>
           'name': nameCtrl.text.trim(),
           'number': numCtrl.text.trim(),
         });
+        await LocalDb.instance.logAudit(
+          'recipient_added',
+          nameCtrl.text.trim(),
+        );
       } else {
         await db.update(
           'recipients',
           {'name': nameCtrl.text.trim(), 'number': numCtrl.text.trim()},
           where: 'id = ?',
           whereArgs: [existing['id']],
+        );
+        await LocalDb.instance.logAudit(
+          'recipient_updated',
+          nameCtrl.text.trim(),
         );
       }
     } catch (_) {
@@ -630,15 +684,19 @@ class _AdminScreenState extends State<AdminScreen>
     try {
       final db = await LocalDb.instance.database;
       await db.delete('recipients', where: 'id = ?', whereArgs: [row['id']]);
+      await LocalDb.instance.logAudit(
+        'recipient_deleted',
+        row['name'] ?? row['number'] ?? '',
+      );
     } catch (_) {}
     setState(() {});
   }
 
   // Agents tab — simple list with toggles
   Widget _agentsTab() {
-    // read agents from local transfers agents field (quick implementation)
-    return FutureBuilder<List<String>>(
-      future: _loadAgents(),
+    // read agents from agents table
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: LocalDb.instance.readAgents(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting)
           return const Center(child: CircularProgressIndicator());
@@ -670,10 +728,20 @@ class _AdminScreenState extends State<AdminScreen>
                   final a = list[i];
                   return ListTile(
                     leading: const Icon(Icons.person),
-                    title: Text(a),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteAgent(a),
+                    title: Text(a['name'] ?? '—'),
+                    subtitle: Text(a['locationId'] ?? ''),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _showAgentEditor(existing: a),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteAgent(a['id']),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -685,25 +753,42 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Future<List<String>> _loadAgents() async {
-    try {
-      final list = await LocalDb.instance.readAll();
-      final names = list.map((t) => t.agentName).toSet().toList();
-      return names;
-    } catch (_) {
-      return [];
-    }
-  }
+  // Agents are read directly from LocalDb.readAgents()
 
-  Future<void> _showAgentEditor() async {
-    final nameCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+  Future<void> _showAgentEditor({Map<String, dynamic>? existing}) async {
+    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
+    final locCtrl = TextEditingController(text: existing?['locationId'] ?? '');
+    final statusCtrl = TextEditingController(
+      text: existing?['status'] ?? 'active',
+    );
+    final commCtrl = TextEditingController(
+      text: (existing?['commissionRate']?.toString() ?? '0'),
+    );
+    final res = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Add agent'),
-        content: TextField(
-          controller: nameCtrl,
-          decoration: const InputDecoration(labelText: 'Agent name'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Agent name'),
+            ),
+            TextField(
+              controller: locCtrl,
+              decoration: const InputDecoration(labelText: 'Location ID'),
+            ),
+            TextField(
+              controller: statusCtrl,
+              decoration: const InputDecoration(labelText: 'Status'),
+            ),
+            TextField(
+              controller: commCtrl,
+              decoration: const InputDecoration(labelText: 'Commission rate'),
+              keyboardType: TextInputType.number,
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -712,36 +797,41 @@ class _AdminScreenState extends State<AdminScreen>
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add'),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-    // simple add: create a dummy transfer to register agent name (not ideal but quick)
+    if (res != true) return;
+    final id = existing != null
+        ? existing['id'] as String
+        : DateTime.now().millisecondsSinceEpoch.toString();
+    final agent = {
+      'id': id,
+      'name': nameCtrl.text.trim(),
+      'locationId': locCtrl.text.trim(),
+      'status': statusCtrl.text.trim(),
+      'dailyVolume': existing?['dailyVolume'] ?? 0,
+      'commissionRate': double.tryParse(commCtrl.text) ?? 0,
+    };
     try {
-      final db = await LocalDb.instance.database;
-      await db.insert('transfers', {
-        'agentName': nameCtrl.text.trim(),
-        'senderNumber': '',
-        'receiverNumber': '',
-        'amount': 0,
-        'charge': 0,
-        'agentFee': 0,
-        'screenshotPath': '',
-        'status': 'pending',
-      });
+      await LocalDb.instance.upsertAgent(agent);
+      final meta = '${agent['id']}:${agent['name']}';
+      await LocalDb.instance.logAudit(
+        existing == null ? 'agent_added' : 'agent_updated',
+        meta,
+      );
     } catch (_) {}
     setState(() {});
   }
 
-  Future<void> _deleteAgent(String name) async {
+  Future<void> _deleteAgent(String id) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete agent'),
-        content: Text(
-          'Delete agent $name? This will remove transfers associated with this agent.',
+        content: const Text(
+          'Delete this agent? This will not remove historical transfers.',
         ),
         actions: [
           TextButton(
@@ -757,8 +847,8 @@ class _AdminScreenState extends State<AdminScreen>
     );
     if (ok != true) return;
     try {
-      final db = await LocalDb.instance.database;
-      await db.delete('transfers', where: 'agentName = ?', whereArgs: [name]);
+      await LocalDb.instance.deleteAgentById(id);
+      await LocalDb.instance.logAudit('agent_deleted', id);
     } catch (_) {}
     setState(() {});
   }
@@ -878,6 +968,7 @@ class _AdminScreenState extends State<AdminScreen>
           'username': userCtrl.text.trim(),
           'role': roleCtrl.text.trim(),
         });
+        await LocalDb.instance.logAudit('user_added', userCtrl.text.trim());
       } else {
         await db.update(
           'users',
@@ -885,6 +976,7 @@ class _AdminScreenState extends State<AdminScreen>
           where: 'id = ?',
           whereArgs: [existing['id']],
         );
+        await LocalDb.instance.logAudit('user_updated', userCtrl.text.trim());
       }
     } catch (_) {}
     setState(() {});
@@ -912,6 +1004,7 @@ class _AdminScreenState extends State<AdminScreen>
     try {
       final db = await LocalDb.instance.database;
       await db.delete('users', where: 'id = ?', whereArgs: [u['id']]);
+      await LocalDb.instance.logAudit('user_deleted', u['username'] ?? '');
     } catch (_) {}
     setState(() {});
   }
@@ -963,67 +1056,146 @@ class _AdminScreenState extends State<AdminScreen>
 
   // Notifications tab — templates list and simple send preview
   Widget _notificationsTab() {
-    final templates = <Map<String, String>>[
-      {
-        'id': '1',
-        'name': 'Payment received',
-        'body': 'Your payment of {{amount}} has been received.',
-      },
-      {
-        'id': '2',
-        'name': 'Payment sent',
-        'body': 'Your payment to {{receiver}} of {{amount}} was sent.',
-      },
-    ];
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: ElevatedButton.icon(
-            onPressed: () => _showNotificationEditor(),
-            icon: const Icon(Icons.add),
-            label: const Text('New template'),
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: templates.length,
-            itemBuilder: (context, i) {
-              final t = templates[i];
-              return ListTile(
-                leading: const Icon(Icons.mail),
-                title: Text(t['name']!),
-                subtitle: Text(t['body']!),
-                trailing: IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Preview: ${t['body']!.replaceAll('{{amount}}', AppConfig.formatCurrency(123.45))}',
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: LocalDb.instance.readNotifications(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final templates = snap.data ?? [];
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: ElevatedButton.icon(
+                onPressed: () => _showNotificationEditor(),
+                icon: const Icon(Icons.add),
+                label: const Text('New template'),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: templates.length,
+                itemBuilder: (context, i) {
+                  final t = templates[i];
+                  return ListTile(
+                    leading: const Icon(Icons.mail),
+                    title: Text(t['name'] ?? '—'),
+                    subtitle: Text(t['body'] ?? ''),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Preview: ${(t['body'] ?? '').replaceAll('{{amount}}', AppConfig.formatCurrency(123.45))}',
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _showNotificationEditor(existing: t),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () async {
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                title: const Text('Delete template'),
+                                content: const Text('Delete this template?'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (ok == true) {
+                              await LocalDb.instance.deleteNotification(
+                                t['id'] as int,
+                              );
+                              await LocalDb.instance.logAudit(
+                                'notification_deleted',
+                                t['name'] ?? '',
+                              );
+                              setState(() {});
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  void _showNotificationEditor() {
+  void _showNotificationEditor({Map<String, dynamic>? existing}) {
+    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
+    final bodyCtrl = TextEditingController(text: existing?['body'] ?? '');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('New template'),
-        content: const Text('Notification templates are not persisted yet.'),
+        title: Text(existing == null ? 'New template' : 'Edit template'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            TextField(
+              controller: bodyCtrl,
+              decoration: const InputDecoration(labelText: 'Body'),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (existing == null) {
+                final nid = await LocalDb.instance.insertNotification({
+                  'name': nameCtrl.text.trim(),
+                  'body': bodyCtrl.text.trim(),
+                });
+                await LocalDb.instance.logAudit(
+                  'notification_created',
+                  '$nid:${nameCtrl.text.trim()}',
+                );
+              } else {
+                await LocalDb.instance.updateNotification(
+                  existing['id'] as int,
+                  {'name': nameCtrl.text.trim(), 'body': bodyCtrl.text.trim()},
+                );
+                await LocalDb.instance.logAudit(
+                  'notification_updated',
+                  '${existing['id']}:${nameCtrl.text.trim()}',
+                );
+              }
+              Navigator.pop(context);
+              setState(() {});
+            },
+            child: const Text('Save'),
           ),
         ],
       ),

@@ -12,6 +12,8 @@ class AppConfig {
   // If true, symbol appears after amount (e.g., "100.00 R"); if false, before ("R100.00")
   static bool currencySymbolAfter = false;
   static int currencyDecimals = 2;
+  // Minimum password strength required (0.0 - 1.0). Default 0.6 = Strong
+  static double passwordMinStrength = 0.6;
 
   static String formatCurrency(num value) {
     final amt = value.toStringAsFixed(currencyDecimals);
@@ -37,6 +39,8 @@ class AppConfig {
       currencySymbolAfter =
           prefs.getBool('currencySymbolAfter') ?? currencySymbolAfter;
       currencyDecimals = prefs.getInt('currencyDecimals') ?? currencyDecimals;
+      passwordMinStrength =
+          prefs.getDouble('passwordMinStrength') ?? passwordMinStrength;
     } catch (_) {}
   }
 
@@ -49,6 +53,7 @@ class AppConfig {
       await prefs.setString('currencySymbol', currencySymbol);
       await prefs.setBool('currencySymbolAfter', currencySymbolAfter);
       await prefs.setInt('currencyDecimals', currencyDecimals);
+      await prefs.setDouble('passwordMinStrength', passwordMinStrength);
     } catch (_) {}
   }
 }

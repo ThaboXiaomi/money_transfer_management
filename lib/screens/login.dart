@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _user = TextEditingController();
   final _pass = TextEditingController();
   bool _loading = false;
+  bool _showPassword = false;
 
   void _doLogin() async {
     if (!_formKey.currentState!.validate()) return;
@@ -83,13 +84,26 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _pass,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.lock),
+                      obscureText: !_showPassword,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.lock),
                         labelText: 'Password',
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _showPassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                          onPressed: () =>
+                              setState(() => _showPassword = !_showPassword),
+                        ),
                       ),
-                      validator: (v) =>
-                          (v == null || v.isEmpty) ? 'Enter password' : null,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Enter password';
+                        if (v.length < 6)
+                          return 'Password must be at least 6 characters';
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 18),
                     _loading

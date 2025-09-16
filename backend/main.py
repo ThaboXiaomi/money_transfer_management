@@ -158,6 +158,31 @@ def authenticate_user(username: str, password: str):
     return {'id': row['id'], 'username': row['username'], 'role': row['role']}
 
 
+def password_strength(password: str) -> float:
+    score = 0.0
+    if len(password) >= 6:
+        score += 0.3
+    if len(password) >= 10:
+        score += 0.2
+    if any(c.isupper() for c in password):
+        score += 0.15
+    if any(c.isdigit() for c in password):
+        score += 0.2
+    if any(not c.isalnum() for c in password):
+        score += 0.15
+    return min(score, 1.0)
+
+
+def _has_upper_and_digit(password: str) -> bool:
+    return any(c.isupper() for c in password) and any(c.isdigit() for c in password)
+
+
+@app.post('/password_strength')
+def check_password_strength(password: str = Form(...)):
+    s = password_strength(password)
+    return {'strength': s, 'score': s, 'hasUpperAndDigit': _has_upper_and_digit(password)}
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
@@ -202,6 +227,20 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.post('/register')
 def register(username: str = Form(...), password: str = Form(...), role: str = Form('agent')):
+    # Validate password length and strength
+    try:
+        min_strength = float(os.environ.get('PASSWORD_MIN_STRENGTH', '0.6'))
+    except Exception:
+        min_strength = 0.6
+    if not password or len(password) < 6:
+        raise HTTPException(status_code=400, detail='Password must be at least 6 characters')
+    # enforce stronger policy: require at least one uppercase and one digit
+    if not _has_upper_and_digit(password):
+        raise HTTPException(status_code=400, detail='Password must include at least one uppercase letter and one digit')
+    strength = password_strength(password)
+    if strength < min_strength:
+        raise HTTPException(status_code=400, detail=f'Password too weak (strength {strength:.2f}), required >= {min_strength}')
+
     conn = get_conn()
     cur = conn.cursor()
     hashed = pwd_context.hash(password)
