@@ -1363,6 +1363,9 @@ class _AdminScreenState extends State<AdminScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: Theme.of(context).textTheme.titleLarge?.color ?? Theme.of(context).colorScheme.onBackground,
+        elevation: 0,
         actions: [
           IconButton(onPressed: _exportCsv, icon: const Icon(Icons.download)),
           IconButton(
@@ -1371,41 +1374,27 @@ class _AdminScreenState extends State<AdminScreen>
             tooltip: 'Refresh',
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            alignment: Alignment.centerLeft,
-            child: Material(
-              color: Colors.transparent,
-              child: TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white70,
-                indicator: BoxDecoration(
-                  color: Colors.indigoAccent,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                indicatorSize: TabBarIndicatorSize.label,
-                indicatorPadding: const EdgeInsets.symmetric(horizontal: 6),
-                labelPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                tabs: const [
-                  Tab(icon: Icon(Icons.swap_horiz), text: 'Transfers'),
-                  Tab(icon: Icon(Icons.people), text: 'Recipients'),
-                  Tab(icon: Icon(Icons.store), text: 'Agents'),
-                  Tab(icon: Icon(Icons.person), text: 'Users'),
-                  Tab(icon: Icon(Icons.assessment), text: 'Reports'),
-                  Tab(icon: Icon(Icons.settings), text: 'Settings'),
-                  Tab(icon: Icon(Icons.notifications), text: 'Notifications'),
-                  Tab(icon: Icon(Icons.history), text: 'Audit Log'),
-                ],
-              ),
-            ),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          labelColor: Colors.indigo,
+          unselectedLabelColor: Colors.black54,
+          indicator: const UnderlineTabIndicator(
+            borderSide: BorderSide(width: 2.5, color: Colors.indigo),
+            insets: EdgeInsets.symmetric(horizontal: 16.0),
           ),
+          indicatorSize: TabBarIndicatorSize.label,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          tabs: const [
+            Tab(icon: Icon(Icons.swap_horiz), text: 'Transfers'),
+            Tab(icon: Icon(Icons.people), text: 'Recipients'),
+            Tab(icon: Icon(Icons.store), text: 'Agents'),
+            Tab(icon: Icon(Icons.person), text: 'Users'),
+            Tab(icon: Icon(Icons.assessment), text: 'Reports'),
+            Tab(icon: Icon(Icons.settings), text: 'Settings'),
+            Tab(icon: Icon(Icons.notifications), text: 'Notifications'),
+            Tab(icon: Icon(Icons.history), text: 'Audit Log'),
+          ],
         ),
       ),
       body: TabBarView(
