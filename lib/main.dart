@@ -44,44 +44,61 @@ class MyApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       useMaterial3: true,
     );
-    return MaterialApp(
-      title: 'Giant Money Transfer',
-      theme: base.copyWith(
-        textTheme: GoogleFonts.interTextTheme(base.textTheme),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppConfig.themeNotifier,
+      builder: (context, dark, _) {
+        return MaterialApp(
+          title: 'Giant Money Transfer',
+          theme: base.copyWith(
+            textTheme: GoogleFonts.interTextTheme(base.textTheme),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 20,
+                ),
+              ),
             ),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
           ),
-        ),
-      ),
-      home: const RoleSelectionScreen(),
-      routes: {
-        '/role-selection': (c) => const RoleSelectionScreen(),
-        '/dashboard': (c) => const DashboardScreen(),
-        '/transfers': (c) => const TransferListScreen(),
-        '/transfer-detail': (c) => const TransferDetailScreen(),
-        '/create-transfer': (c) => const CreateTransferScreen(),
-        '/recipients': (c) => const RecipientsScreen(),
-        '/sender-profile': (c) => const SenderProfileScreen(),
-        '/agent-dashboard': (c) => const AgentDashboardScreen(),
-        '/agent-locator': (c) => const AgentLocatorScreen(),
-        '/pricing': (c) => const PricingEditorScreen(),
-        '/exchange-rates': (c) => const ExchangeRatesScreen(),
-        '/settlements': (c) => const SettlementsScreen(),
-        '/audit-log': (c) => const AuditLogScreen(),
-        '/kyc': (c) => const KYCScreen(),
-        '/notifications': (c) => const NotificationsScreen(),
-        '/reports': (c) => const ReportsScreen(),
-        '/users': (c) => const UserManagementScreen(),
-        '/roles': (c) => const RolesEditorScreen(),
-        '/refunds': (c) => const RefundsScreen(),
-        '/bulk-import': (c) => const BulkImportScreen(),
-        '/support': (c) => const SupportScreen(),
+          darkTheme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.indigo,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+          home: const RoleSelectionScreen(),
+          routes: {
+            '/role-selection': (c) => const RoleSelectionScreen(),
+            '/dashboard': (c) => const DashboardScreen(),
+            '/transfers': (c) => const TransferListScreen(),
+            '/transfer-detail': (c) => const TransferDetailScreen(),
+            '/create-transfer': (c) => const CreateTransferScreen(),
+            '/recipients': (c) => const RecipientsScreen(),
+            '/sender-profile': (c) => const SenderProfileScreen(),
+            '/agent-dashboard': (c) => const AgentDashboardScreen(),
+            '/agent-locator': (c) => const AgentLocatorScreen(),
+            '/pricing': (c) => const PricingEditorScreen(),
+            '/exchange-rates': (c) => const ExchangeRatesScreen(),
+            '/settlements': (c) => const SettlementsScreen(),
+            '/audit-log': (c) => const AuditLogScreen(),
+            '/kyc': (c) => const KYCScreen(),
+            '/notifications': (c) => const NotificationsScreen(),
+            '/reports': (c) => const ReportsScreen(),
+            '/users': (c) => const UserManagementScreen(),
+            '/roles': (c) => const RolesEditorScreen(),
+            '/refunds': (c) => const RefundsScreen(),
+            '/bulk-import': (c) => const BulkImportScreen(),
+            '/support': (c) => const SupportScreen(),
+          },
+          debugShowCheckedModeBanner: false,
+        );
       },
-      debugShowCheckedModeBanner: false,
     );
   }
 }

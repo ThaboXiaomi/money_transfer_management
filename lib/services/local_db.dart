@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/transfer.dart';
+import 'package:flutter/foundation.dart';
 
 class LocalDb {
   static final LocalDb instance = LocalDb._init();
@@ -149,6 +150,10 @@ class LocalDb {
 
   // Audit helper
   Future<void> logAudit(String action, String meta) async {
+    if (kIsWeb) {
+      // No local DB on web; no-op for audit logging
+      return;
+    }
     final db = await instance.database;
     await db.insert('audit', {
       'action': action,
@@ -159,42 +164,69 @@ class LocalDb {
 
   // Notifications CRUD
   Future<int> insertNotification(Map<String, dynamic> n) async {
+    if (kIsWeb) {
+      return 0;
+    }
     final db = await instance.database;
     return await db.insert('notifications', n);
   }
 
   Future<List<Map<String, dynamic>>> readNotifications() async {
+    if (kIsWeb) return [];
     final db = await instance.database;
     return await db.query('notifications', orderBy: 'id DESC');
   }
 
   Future<void> updateNotification(int id, Map<String, dynamic> n) async {
+    if (kIsWeb) return;
     final db = await instance.database;
     await db.update('notifications', n, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> deleteNotification(int id) async {
+    if (kIsWeb) return;
     final db = await instance.database;
     await db.delete('notifications', where: 'id = ?', whereArgs: [id]);
   }
 
   // Agents CRUD helpers
   Future<void> upsertAgent(Map<String, dynamic> a) async {
+    if (kIsWeb) return;
     final db = await instance.database;
     await db.insert('agents', a, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<List<Map<String, dynamic>>> readAgents() async {
+    if (kIsWeb) return [];
     final db = await instance.database;
     return await db.query('agents');
   }
 
   Future<void> deleteAgentById(String id) async {
+    if (kIsWeb) return;
     final db = await instance.database;
     await db.delete('agents', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<Transfer> createTransfer(Transfer t) async {
+    if (kIsWeb) {
+      // On web we don't have a local sqlite DB. Return the transfer with a generated id.
+      final id = DateTime.now().millisecondsSinceEpoch;
+      return Transfer(
+        id: id,
+        agentName: t.agentName,
+        agentId: (t as dynamic).agentId,
+        senderNumber: t.senderNumber,
+        receiverNumber: t.receiverNumber,
+        amount: t.amount,
+        charge: t.charge,
+        agentFee: t.agentFee,
+        screenshotPath: t.screenshotPath,
+        status: t.status,
+        txRef: t.txRef,
+        destination: t.destination,
+      );
+    }
     final db = await instance.database;
     final id = await db.insert('transfers', t.toMap());
     return Transfer(
@@ -214,12 +246,14 @@ class LocalDb {
   }
 
   Future<List<Transfer>> readAll() async {
+    if (kIsWeb) return [];
     final db = await instance.database;
     final res = await db.query('transfers', orderBy: 'id DESC');
     return res.map((m) => Transfer.fromMap(m)).toList();
   }
 
   Future close() async {
+    if (kIsWeb) return;
     final db = await instance.database;
     db.close();
   }

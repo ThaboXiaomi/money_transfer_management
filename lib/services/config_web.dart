@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AppConfig {
@@ -14,6 +15,11 @@ class AppConfig {
   static int currencyDecimals = 2;
   // Minimum password strength required (0.0 - 1.0). Default 0.6 = Strong
   static double passwordMinStrength = 0.6;
+  // Theme preference for web
+  static bool darkMode = false;
+  static final ValueNotifier<bool> themeNotifier = ValueNotifier<bool>(
+    darkMode,
+  );
 
   static String formatCurrency(num value) {
     final amt = value.toStringAsFixed(currencyDecimals);
@@ -41,6 +47,8 @@ class AppConfig {
       currencyDecimals = prefs.getInt('currencyDecimals') ?? currencyDecimals;
       passwordMinStrength =
           prefs.getDouble('passwordMinStrength') ?? passwordMinStrength;
+      darkMode = prefs.getBool('darkMode') ?? darkMode;
+      themeNotifier.value = darkMode;
     } catch (_) {}
   }
 
@@ -54,6 +62,7 @@ class AppConfig {
       await prefs.setBool('currencySymbolAfter', currencySymbolAfter);
       await prefs.setInt('currencyDecimals', currencyDecimals);
       await prefs.setDouble('passwordMinStrength', passwordMinStrength);
+      await prefs.setBool('darkMode', darkMode);
     } catch (_) {}
   }
 }

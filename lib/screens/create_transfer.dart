@@ -6,6 +6,7 @@ import '../models/transfer.dart';
 import '../services/api_service.dart';
 import '../services/config.dart';
 import '../services/local_db.dart';
+import '../services/pricing.dart';
 
 class CreateTransferScreen extends StatefulWidget {
   const CreateTransferScreen({super.key});
@@ -103,6 +104,14 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
     _txRefCtrl.dispose();
     _destinationCtrl.dispose();
     super.dispose();
+  }
+
+  void _recalculateFees() {
+    final amt = double.tryParse(_amountCtrl.text) ?? 0.0;
+    final charge = Pricing.getCharge(amt);
+    final agentFee = double.parse((charge * 0.3).toStringAsFixed(2));
+    _chargeCtrl.text = charge.toStringAsFixed(2);
+    _agentFeeCtrl.text = agentFee.toStringAsFixed(2);
   }
 
   @override
@@ -206,6 +215,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                         validator: (v) => (double.tryParse(v ?? '') ?? 0) <= 0
                             ? 'Invalid amount'
                             : null,
+                        onChanged: (_) => setState(_recalculateFees),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -216,6 +226,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                           decimal: true,
                         ),
                         decoration: const InputDecoration(labelText: 'Charge'),
+                        readOnly: true,
                       ),
                     ),
                   ],
@@ -224,7 +235,82 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                 TextFormField(
                   controller: _agentFeeCtrl,
                   keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Agent Fee'),
+                  decoration: const InputDecoration(
+                    labelText: 'Agent Fee (30%)',
+                  ),
+                  readOnly: true,
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Charge',
+                              style: TextStyle(color: Colors.black54),
+                            ),
+                            Text(
+                              'R' +
+                                  (_chargeCtrl.text.isEmpty
+                                      ? '0.00'
+                                      : _chargeCtrl.text),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Agent fee (30%)',
+                              style: TextStyle(color: Colors.black54),
+                            ),
+                            Text(
+                              'R' +
+                                  (_agentFeeCtrl.text.isEmpty
+                                      ? '0.00'
+                                      : _agentFeeCtrl.text),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Total Payable',
+                              style: TextStyle(color: Colors.black54),
+                            ),
+                            Builder(
+                              builder: (_) {
+                                final amt =
+                                    double.tryParse(_amountCtrl.text) ?? 0.0;
+                                final charge =
+                                    double.tryParse(_chargeCtrl.text) ?? 0.0;
+                                final total = amt + charge;
+                                return Text(
+                                  'R' + total.toStringAsFixed(2),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextFormField(

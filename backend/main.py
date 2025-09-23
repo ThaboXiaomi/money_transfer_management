@@ -306,6 +306,16 @@ def list_recipients(current_user=Depends(get_current_user)):
     return [dict(r) for r in rows]
 
 
+@app.get('/users')
+def list_users(current_user=Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT id, username, role FROM users ORDER BY id DESC')
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 @app.post('/recipients')
 def create_recipient(
     ownerId: str = Form(...),

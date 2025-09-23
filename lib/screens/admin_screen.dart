@@ -1,4 +1,4 @@
-import 'dart:io';
+// don't import dart:io directly; use platform helpers for file ops
 import 'package:flutter/material.dart';
 import '../models/transfer.dart';
 import '../services/local_db.dart';
@@ -7,6 +7,8 @@ import '../services/api_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
+import '../services/platform_file.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -47,14 +49,19 @@ class _AdminScreenState extends State<AdminScreen>
       final prefs = await http.get(uri);
       if (prefs.statusCode == 200) {
         final bytes = prefs.bodyBytes;
-        final dir = await getTemporaryDirectory();
-        final file = File(
-          '${dir.path}/transfers_${DateTime.now().millisecondsSinceEpoch}.csv',
-        );
-        await file.writeAsBytes(bytes);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('CSV saved to ${file.path}')));
+        if (kIsWeb) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CSV ready (web): saved on server')),
+          );
+        } else {
+          final dir = await getTemporaryDirectory();
+          final filename =
+              'transfers_${DateTime.now().millisecondsSinceEpoch}.csv';
+          final path = pf_writeFileBytesSync(dir.path, filename, bytes);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('CSV saved to $path')));
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Export failed: ${prefs.statusCode}')),
@@ -88,14 +95,19 @@ class _AdminScreenState extends State<AdminScreen>
         ]);
       }
       final csv = const ListToCsvConverter().convert(rows);
-      final dir = await getTemporaryDirectory();
-      final file = File(
-        '${dir.path}/transfers_${DateTime.now().millisecondsSinceEpoch}.csv',
-      );
-      await file.writeAsString(csv);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('CSV saved to ${file.path}')));
+      if (kIsWeb) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CSV ready (web): copy from UI')),
+        );
+      } else {
+        final dir = await getTemporaryDirectory();
+        final filename =
+            'transfers_${DateTime.now().millisecondsSinceEpoch}.csv';
+        final path = pf_writeFileStringSync(dir.path, filename, csv);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('CSV saved to $path')));
+      }
     }
   }
 
@@ -111,16 +123,17 @@ class _AdminScreenState extends State<AdminScreen>
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _statTile('Transfers', count.toString(), Icons.swap_horiz),
             _statTile(
-              'Total',
+              'Total transferred',
               AppConfig.formatCurrency(total),
               Icons.attach_money,
             ),
-            _statTile('Pending', pending.toString(), Icons.hourglass_bottom),
-            _statTile('Sent', sent.toString(), Icons.check_circle),
+            _statTile('Transfers', count.toString(), Icons.swap_horiz),
+            _statTile('Pending', pending.toString(), Icons.hourglass_empty),
+
+            _statTile('Sent', sent.toString(), Icons.send),
           ],
         ),
       ),
@@ -157,21 +170,73 @@ class _AdminScreenState extends State<AdminScreen>
                 itemCount: list.length,
                 itemBuilder: (context, i) {
                   final t = list[i];
-                  final leading = (t.screenshotPath.isNotEmpty)
-                      ? (AppConfig.useBackend
-                            ? Image.network(
-                                t.screenshotPath,
-                                width: 72,
-                                height: 72,
-                                fit: BoxFit.cover,
-                              )
-                            : Image.file(
-                                File(t.screenshotPath),
-                                width: 72,
-                                height: 72,
-                                fit: BoxFit.cover,
-                              ))
-                      : const Icon(Icons.receipt_long, size: 56);
+                  Widget leading = const Icon(Icons.receipt_long, size: 56);
+                  if (t.screenshotPath.isNotEmpty) {
+                    try {
+                      final src = t.screenshotPath.trim();
+                      if (src.startsWith('data:image')) {
+                        // base64 data URI
+                        leading = Image.memory(
+                          UriData.parse(src).contentAsBytes(),
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                        );
+                      } else if (AppConfig.useBackend &&
+                          (src.startsWith('http://') ||
+                              src.startsWith('https://'))) {
+                        // Only attempt network image decoding for known image file extensions.
+                        final lower = src.toLowerCase();
+                        final isImage =
+                            lower.endsWith('.png') ||
+                            lower.endsWith('.jpg') ||
+                            lower.endsWith('.jpeg') ||
+                            lower.endsWith('.gif') ||
+                            lower.endsWith('.webp') ||
+                            lower.endsWith('.bmp');
+                        if (isImage) {
+                          leading = Image.network(
+                            src,
+                            width: 72,
+                            height: 72,
+                            fit: BoxFit.cover,
+                          );
+                        } else {
+                          // backend returned a non-image file (e.g. .txt) — show icon instead
+                          leading = const Icon(
+                            Icons.insert_drive_file,
+                            size: 56,
+                          );
+                        }
+                      } else {
+                        final bytes = pf_readFileBytes(src);
+                        if (bytes != null) {
+                          leading = Image.memory(
+                            bytes,
+                            width: 72,
+                            height: 72,
+                            fit: BoxFit.cover,
+                          );
+                        } else {
+                          leading = const Icon(Icons.receipt_long, size: 56);
+                        }
+                      }
+                    } catch (_) {
+                      leading = const Icon(Icons.receipt_long, size: 56);
+                    }
+                  }
+                  Color statusColor;
+                  switch (t.status.toLowerCase()) {
+                    case 'sent':
+                      statusColor = Colors.green.shade600;
+                      break;
+                    case 'complete':
+                      statusColor = Colors.teal.shade600;
+                      break;
+                    case 'pending':
+                    default:
+                      statusColor = Colors.orange.shade600;
+                  }
 
                   return Card(
                     margin: const EdgeInsets.symmetric(
@@ -195,16 +260,53 @@ class _AdminScreenState extends State<AdminScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  '${t.agentName} — ${AppConfig.formatCurrency(t.amount)}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '${t.agentName} — ${AppConfig.formatCurrency(t.amount)}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: statusColor.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: statusColor.withOpacity(0.8),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        t.status.toUpperCase(),
+                                        style: TextStyle(
+                                          color: statusColor,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text('Receiver: ${t.receiverNumber}'),
-                                if (((t as dynamic).txRef ?? '').isNotEmpty)
-                                  Text('TX Ref: ${(t as dynamic).txRef}'),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  runSpacing: 6,
+                                  spacing: 12,
+                                  children: [
+                                    Text('ID: ${t.id ?? '-'}'),
+                                    Text('Receiver: ${t.receiverNumber}'),
+                                    if ((t.txRef ?? '').isNotEmpty)
+                                      Text('TX: ${t.txRef}'),
+                                    if ((t.destination ?? '').isNotEmpty)
+                                      Text('To: ${t.destination}'),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
                                 Text(
                                   'Agent fee: ${AppConfig.formatCurrency(t.agentFee)}',
                                 ),
@@ -430,6 +532,7 @@ class _AdminScreenState extends State<AdminScreen>
                           AppConfig.currencySymbol = symbolCtrl.text.trim();
                           AppConfig.currencySymbolAfter = after;
                           AppConfig.currencyDecimals = decimals;
+                          // Also ensure theme preference persists when saving here
                           try {
                             await AppConfig.save();
                           } catch (_) {}
@@ -450,6 +553,23 @@ class _AdminScreenState extends State<AdminScreen>
                     ],
                   ),
                   const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('Dark mode'),
+                      const SizedBox(width: 8),
+                      Switch(
+                        value: AppConfig.darkMode,
+                        onChanged: (v) async {
+                          AppConfig.darkMode = v;
+                          AppConfig.themeNotifier.value = v;
+                          try {
+                            await AppConfig.save();
+                          } catch (_) {}
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12.0),
@@ -1251,19 +1371,41 @@ class _AdminScreenState extends State<AdminScreen>
             tooltip: 'Refresh',
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: const [
-            Tab(icon: Icon(Icons.swap_horiz), text: 'Transfers'),
-            Tab(icon: Icon(Icons.people), text: 'Recipients'),
-            Tab(icon: Icon(Icons.store), text: 'Agents'),
-            Tab(icon: Icon(Icons.person), text: 'Users'),
-            Tab(icon: Icon(Icons.assessment), text: 'Reports'),
-            Tab(icon: Icon(Icons.settings), text: 'Settings'),
-            Tab(icon: Icon(Icons.notifications), text: 'Notifications'),
-            Tab(icon: Icon(Icons.history), text: 'Audit Log'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            alignment: Alignment.centerLeft,
+            child: Material(
+              color: Colors.transparent,
+              child: TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                indicator: BoxDecoration(
+                  color: Colors.indigoAccent,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                indicatorSize: TabBarIndicatorSize.label,
+                indicatorPadding: const EdgeInsets.symmetric(horizontal: 6),
+                labelPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                tabs: const [
+                  Tab(icon: Icon(Icons.swap_horiz), text: 'Transfers'),
+                  Tab(icon: Icon(Icons.people), text: 'Recipients'),
+                  Tab(icon: Icon(Icons.store), text: 'Agents'),
+                  Tab(icon: Icon(Icons.person), text: 'Users'),
+                  Tab(icon: Icon(Icons.assessment), text: 'Reports'),
+                  Tab(icon: Icon(Icons.settings), text: 'Settings'),
+                  Tab(icon: Icon(Icons.notifications), text: 'Notifications'),
+                  Tab(icon: Icon(Icons.history), text: 'Audit Log'),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
       body: TabBarView(
