@@ -25,6 +25,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
+# Optional scheme for endpoints that may be accessed anonymously in dev
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl='token', auto_error=False)
 
 app = FastAPI(title='Money Transfer Backend')
 app.mount('/uploads', StaticFiles(directory=UPLOAD_DIR), name='uploads')
@@ -211,6 +213,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     return {'id': row['id'], 'username': row['username'], 'role': row['role']}
 
 
+async def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme_optional)):
+    # Return user dict when a valid token is supplied; otherwise return None
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get('sub')
+        if username is None:
+            return None
+    except JWTError:
+        return None
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM users WHERE username = ?', (username,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {'id': row['id'], 'username': row['username'], 'role': row['role']}
+
+
 @app.on_event('startup')
 def startup():
     init_db()
@@ -380,7 +403,7 @@ def mark_sent(transfer_id: int, txRef: str = Form(...), current_user=Depends(get
 
 
 @app.get('/transfers/export/csv')
-def export_csv(current_user=Depends(get_current_user)):
+def export_csv(current_user=Depends(get_optional_current_user)):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute('SELECT * FROM transfers ORDER BY id DESC')

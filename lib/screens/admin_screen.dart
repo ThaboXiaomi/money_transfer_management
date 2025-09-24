@@ -5,6 +5,7 @@ import '../services/local_db.dart';
 import '../services/config.dart';
 import '../services/api_service.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
@@ -46,7 +47,10 @@ class _AdminScreenState extends State<AdminScreen>
   Future<void> _exportCsv() async {
     if (AppConfig.useBackend) {
       final uri = Uri.parse('${AppConfig.backendBase}/transfers/export/csv');
-      final prefs = await http.get(uri);
+      final sp = await SharedPreferences.getInstance();
+      final token = sp.getString('jwt');
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
+      final prefs = await http.get(uri, headers: headers);
       if (prefs.statusCode == 200) {
         final bytes = prefs.bodyBytes;
         if (kIsWeb) {
@@ -164,7 +168,51 @@ class _AdminScreenState extends State<AdminScreen>
         final list = snap.data!;
         return Column(
           children: [
-            _buildSummary(list),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                children: [
+                  Expanded(child: _buildSummary(list)),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Delete all transfers'),
+                          content: const Text(
+                            'Delete ALL transfers from local DB? This cannot be undone.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok == true) {
+                        try {
+                          final db = await LocalDb.instance.database;
+                          await db.delete('transfers');
+                          await LocalDb.instance.logAudit(
+                            'transfers_deleted_all',
+                            'admin',
+                          );
+                        } catch (_) {}
+                        setState(() => _load());
+                      }
+                    },
+                    icon: const Icon(Icons.delete_forever),
+                    label: const Text('Delete All'),
+                  ),
+                ],
+              ),
+            ),
             Expanded(
               child: ListView.builder(
                 itemCount: list.length,
@@ -353,9 +401,16 @@ class _AdminScreenState extends State<AdminScreen>
                                       final uri = Uri.parse(
                                         '${AppConfig.backendBase}/transfers/$id/mark_sent',
                                       );
+                                      final sp =
+                                          await SharedPreferences.getInstance();
+                                      final token = sp.getString('jwt');
+                                      final headers = token != null
+                                          ? {'Authorization': 'Bearer $token'}
+                                          : null;
                                       final prefs = await http.post(
                                         uri,
                                         body: {'txRef': tx},
+                                        headers: headers,
                                       );
                                       if (prefs.statusCode == 200) {
                                         ScaffoldMessenger.of(
@@ -838,6 +893,12 @@ class _AdminScreenState extends State<AdminScreen>
                     icon: const Icon(Icons.refresh),
                     label: const Text('Refresh'),
                   ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _assignMissingAgentIds,
+                    icon: const Icon(Icons.admin_panel_settings),
+                    label: const Text('Assign Missing IDs'),
+                  ),
                 ],
               ),
             ),
@@ -853,6 +914,18 @@ class _AdminScreenState extends State<AdminScreen>
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        // Show agent id if present
+                        if ((a['id'] ?? '').toString().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: Text(a['id'].toString()),
+                          )
+                        else
+                          IconButton(
+                            tooltip: 'Assign ID',
+                            icon: const Icon(Icons.how_to_reg),
+                            onPressed: () => _assignAgentId(a),
+                          ),
                         IconButton(
                           icon: const Icon(Icons.edit),
                           onPressed: () => _showAgentEditor(existing: a),
@@ -969,6 +1042,63 @@ class _AdminScreenState extends State<AdminScreen>
     try {
       await LocalDb.instance.deleteAgentById(id);
       await LocalDb.instance.logAudit('agent_deleted', id);
+    } catch (_) {}
+    setState(() {});
+  }
+
+  // Assign a generated id to a single agent if missing
+  Future<void> _assignAgentId(Map<String, dynamic> agent) async {
+    try {
+      final currentId = (agent['id'] ?? '').toString();
+      if (currentId.isNotEmpty) return; // already has id
+      final newId = 'AG' + DateTime.now().millisecondsSinceEpoch.toString();
+      final updated = Map<String, dynamic>.from(agent);
+      updated['id'] = newId;
+      await LocalDb.instance.upsertAgent(updated);
+      await LocalDb.instance.logAudit(
+        'agent_assigned_id',
+        '${newId}:${updated['name'] ?? ''}',
+      );
+    } catch (_) {}
+    setState(() {});
+  }
+
+  // Bulk assign missing IDs to agents without an id
+  Future<void> _assignMissingAgentIds() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Assign Missing IDs'),
+        content: const Text(
+          'Assign generated Agent IDs to agents missing one?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Assign'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final agents = await LocalDb.instance.readAgents();
+      for (final a in agents) {
+        if ((a['id'] ?? '').toString().isEmpty) {
+          final newId = 'AG' + DateTime.now().millisecondsSinceEpoch.toString();
+          final updated = Map<String, dynamic>.from(a);
+          updated['id'] = newId;
+          await LocalDb.instance.upsertAgent(updated);
+          await LocalDb.instance.logAudit(
+            'agent_assigned_id',
+            '${newId}:${updated['name'] ?? ''}',
+          );
+        }
+      }
     } catch (_) {}
     setState(() {});
   }
@@ -1364,7 +1494,9 @@ class _AdminScreenState extends State<AdminScreen>
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        foregroundColor: Theme.of(context).textTheme.titleLarge?.color ?? Theme.of(context).colorScheme.onBackground,
+        foregroundColor:
+            Theme.of(context).textTheme.titleLarge?.color ??
+            Theme.of(context).colorScheme.onBackground,
         elevation: 0,
         actions: [
           IconButton(onPressed: _exportCsv, icon: const Icon(Icons.download)),
