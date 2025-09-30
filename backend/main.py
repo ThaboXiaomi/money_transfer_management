@@ -3,8 +3,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response, Body
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -56,10 +56,8 @@ def favicon():
 # CORS - allow requests from local dev servers / Flutter web during development
 app.add_middleware(
     CORSMiddleware,
-    # Allow common development origins (localhost, 127.0.0.1, Android emulator 10.0.2.2)
-    allow_origins=[],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$",
-    # You can switch to allow_origins=['https://yourdomain.com'] in prod
+    # During local development allow common dev origins. Use a narrower list in production.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -319,6 +317,62 @@ def list_transfers(current_user=Depends(get_current_user)):
     return [dict(r) for r in rows]
 
 
+@app.delete('/transfers/{transfer_id}')
+def delete_transfer(transfer_id: int, current_user=Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT screenshotPath FROM transfers WHERE id = ?', (transfer_id,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail='Transfer not found')
+    filename = row['screenshotPath'] if row['screenshotPath'] is not None else ''
+    cur.execute('DELETE FROM transfers WHERE id = ?', (transfer_id,))
+    conn.commit()
+    conn.close()
+    # attempt to remove uploaded file if present
+    try:
+        if filename:
+            fp = os.path.join(UPLOAD_DIR, filename)
+            if os.path.exists(fp):
+                os.remove(fp)
+    except Exception:
+        pass
+    return {'ok': True}
+
+
+@app.put('/transfers/{transfer_id}')
+def update_transfer(transfer_id: int, payload: dict = Body(...), current_user=Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM transfers WHERE id = ?', (transfer_id,))
+    if cur.fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail='Transfer not found')
+
+    allowed = ['agentName', 'senderNumber', 'receiverNumber', 'amount', 'charge', 'agentFee', 'screenshotPath', 'status', 'destination', 'txRef']
+    sets = []
+    vals = []
+    for k in allowed:
+        if k in payload:
+            val = payload[k]
+            if k in ('amount', 'charge', 'agentFee'):
+                try:
+                    val = float(val)
+                except Exception:
+                    # leave as-is; sqlite will coerce or fail
+                    pass
+            sets.append(f"{k} = ?")
+            vals.append(val)
+    if sets:
+        vals.append(transfer_id)
+        sql = 'UPDATE transfers SET ' + ','.join(sets) + ' WHERE id = ?'
+        cur.execute(sql, tuple(vals))
+        conn.commit()
+    conn.close()
+    return {'ok': True}
+
+
 @app.get('/recipients')
 def list_recipients(current_user=Depends(get_current_user)):
     conn = get_conn()
@@ -415,5 +469,5 @@ def export_csv(current_user=Depends(get_optional_current_user)):
         for r in rows:
             row = [str(r[h]) if r[h] is not None else '' for h in header]
             yield ','.join(row) + '\n'
-    return Response(iter_csv(), media_type='text/csv')
+    return StreamingResponse(iter_csv(), media_type='text/csv')
 

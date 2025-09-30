@@ -6,6 +6,7 @@ import '../services/config.dart';
 import '../services/api_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
@@ -51,6 +52,7 @@ class _AdminScreenState extends State<AdminScreen>
       final token = sp.getString('jwt');
       final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
       final prefs = await http.get(uri, headers: headers);
+      if (!mounted) return;
       if (prefs.statusCode == 200) {
         final bytes = prefs.bodyBytes;
         if (kIsWeb) {
@@ -59,6 +61,7 @@ class _AdminScreenState extends State<AdminScreen>
           );
         } else {
           final dir = await getTemporaryDirectory();
+          if (!mounted) return;
           final filename =
               'transfers_${DateTime.now().millisecondsSinceEpoch}.csv';
           final path = pf_writeFileBytesSync(dir.path, filename, bytes);
@@ -73,6 +76,7 @@ class _AdminScreenState extends State<AdminScreen>
       }
     } else {
       final list = await LocalDb.instance.readAll();
+      if (!mounted) return;
       final rows = <List<dynamic>>[];
       rows.add([
         'id',
@@ -105,6 +109,7 @@ class _AdminScreenState extends State<AdminScreen>
         );
       } else {
         final dir = await getTemporaryDirectory();
+        if (!mounted) return;
         final filename =
             'transfers_${DateTime.now().millisecondsSinceEpoch}.csv';
         final path = pf_writeFileStringSync(dir.path, filename, csv);
@@ -130,28 +135,48 @@ class _AdminScreenState extends State<AdminScreen>
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _statTile(
+              context,
               'Total transferred',
               AppConfig.formatCurrency(total),
               Icons.attach_money,
             ),
-            _statTile('Transfers', count.toString(), Icons.swap_horiz),
-            _statTile('Pending', pending.toString(), Icons.hourglass_empty),
+            _statTile(context, 'Transfers', count.toString(), Icons.swap_horiz),
+            _statTile(
+              context,
+              'Pending',
+              pending.toString(),
+              Icons.hourglass_empty,
+            ),
 
-            _statTile('Sent', sent.toString(), Icons.send),
+            _statTile(context, 'Sent', sent.toString(), Icons.send),
           ],
         ),
       ),
     );
   }
 
-  Widget _statTile(String title, String value, IconData icon) => Column(
+  Widget _statTile(
+    BuildContext context,
+    String title,
+    String value,
+    IconData icon,
+  ) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(icon, size: 28, color: Colors.indigo),
+      Icon(icon, size: 28, color: Theme.of(context).colorScheme.primary),
       const SizedBox(height: 6),
-      Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+      Text(
+        value,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
+      ),
       const SizedBox(height: 4),
-      Text(title, style: const TextStyle(color: Colors.black54)),
+      Text(
+        title,
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
     ],
   );
 
@@ -174,41 +199,19 @@ class _AdminScreenState extends State<AdminScreen>
                 children: [
                   Expanded(child: _buildSummary(list)),
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Delete all transfers'),
-                          content: const Text(
-                            'Delete ALL transfers from local DB? This cannot be undone.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Cancel'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Delete'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (ok == true) {
-                        try {
-                          final db = await LocalDb.instance.database;
-                          await db.delete('transfers');
-                          await LocalDb.instance.logAudit(
-                            'transfers_deleted_all',
-                            'admin',
-                          );
-                        } catch (_) {}
-                        setState(() => _load());
-                      }
-                    },
-                    icon: const Icon(Icons.delete_forever),
-                    label: const Text('Delete All'),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: _exportCsv,
+                        icon: const Icon(Icons.download),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => setState(() => _load()),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Refresh'),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -218,22 +221,16 @@ class _AdminScreenState extends State<AdminScreen>
                 itemCount: list.length,
                 itemBuilder: (context, i) {
                   final t = list[i];
-                  Widget leading = const Icon(Icons.receipt_long, size: 56);
+                  ImageProvider<Object>? imageProvider;
                   if (t.screenshotPath.isNotEmpty) {
                     try {
                       final src = t.screenshotPath.trim();
                       if (src.startsWith('data:image')) {
-                        // base64 data URI
-                        leading = Image.memory(
-                          UriData.parse(src).contentAsBytes(),
-                          width: 72,
-                          height: 72,
-                          fit: BoxFit.cover,
-                        );
+                        final bytes = UriData.parse(src).contentAsBytes();
+                        imageProvider = MemoryImage(bytes);
                       } else if (AppConfig.useBackend &&
                           (src.startsWith('http://') ||
                               src.startsWith('https://'))) {
-                        // Only attempt network image decoding for known image file extensions.
                         final lower = src.toLowerCase();
                         final isImage =
                             lower.endsWith('.png') ||
@@ -242,37 +239,16 @@ class _AdminScreenState extends State<AdminScreen>
                             lower.endsWith('.gif') ||
                             lower.endsWith('.webp') ||
                             lower.endsWith('.bmp');
-                        if (isImage) {
-                          leading = Image.network(
-                            src,
-                            width: 72,
-                            height: 72,
-                            fit: BoxFit.cover,
-                          );
-                        } else {
-                          // backend returned a non-image file (e.g. .txt) — show icon instead
-                          leading = const Icon(
-                            Icons.insert_drive_file,
-                            size: 56,
-                          );
-                        }
+                        if (isImage) imageProvider = NetworkImage(src);
                       } else {
                         final bytes = pf_readFileBytes(src);
-                        if (bytes != null) {
-                          leading = Image.memory(
-                            bytes,
-                            width: 72,
-                            height: 72,
-                            fit: BoxFit.cover,
-                          );
-                        } else {
-                          leading = const Icon(Icons.receipt_long, size: 56);
-                        }
+                        if (bytes != null) imageProvider = MemoryImage(bytes);
                       }
                     } catch (_) {
-                      leading = const Icon(Icons.receipt_long, size: 56);
+                      imageProvider = null;
                     }
                   }
+
                   Color statusColor;
                   switch (t.status.toLowerCase()) {
                     case 'sent':
@@ -294,179 +270,112 @@ class _AdminScreenState extends State<AdminScreen>
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Row(
+                    elevation: 1,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      leading: CircleAvatar(
+                        radius: 28,
+                        backgroundImage: imageProvider,
+                        child: imageProvider == null
+                            ? const Icon(Icons.receipt_long, size: 28)
+                            : null,
+                      ),
+                      title: Row(
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: leading,
-                          ),
-                          const SizedBox(width: 12),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        '${t.agentName} — ${AppConfig.formatCurrency(t.amount)}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: statusColor.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: statusColor.withOpacity(0.8),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        t.status.toUpperCase(),
-                                        style: TextStyle(
-                                          color: statusColor,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                            child: Text(
+                              '${t.agentName} — ${AppConfig.formatCurrency(t.amount)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Chip(
+                            backgroundColor: statusColor.withAlpha(
+                              (0.12 * 255).toInt(),
+                            ),
+                            label: Text(
+                              t.status.toUpperCase(),
+                              style: TextStyle(
+                                color: statusColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            children: [
+                              Text('ID: ${t.id ?? '-'}'),
+                              Text('Receiver: ${t.receiverNumber}'),
+                              if ((t.txRef ?? '').isNotEmpty)
+                                Text('TX: ${t.txRef}'),
+                              if ((t.destination ?? '').isNotEmpty)
+                                Text('To: ${t.destination}'),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Agent fee: ${AppConfig.formatCurrency(t.agentFee)}',
+                          ),
+                        ],
+                      ),
+                      trailing: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 20,
+                                height: 20,
+                              ),
+                              iconSize: 16,
+                              icon: const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                              ),
+                              onPressed: () => _markTransferSent(t),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          SizedBox(
+                            width: 28,
+                            height: 20,
+                            child: PopupMenuButton<String>(
+                              padding: EdgeInsets.zero,
+                              iconSize: 16,
+                              icon: const Icon(Icons.more_vert),
+                              onSelected: (v) async {
+                                if (v == 'delete') {
+                                  await _confirmAndDeleteTransfer(t);
+                                } else if (v == 'edit') {
+                                  await _showEditTransferDialog(t);
+                                }
+                              },
+                              itemBuilder: (ctx) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit'),
                                 ),
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  runSpacing: 6,
-                                  spacing: 12,
-                                  children: [
-                                    Text('ID: ${t.id ?? '-'}'),
-                                    Text('Receiver: ${t.receiverNumber}'),
-                                    if ((t.txRef ?? '').isNotEmpty)
-                                      Text('TX: ${t.txRef}'),
-                                    if ((t.destination ?? '').isNotEmpty)
-                                      Text('To: ${t.destination}'),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Agent fee: ${AppConfig.formatCurrency(t.agentFee)}',
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete'),
                                 ),
                               ],
                             ),
-                          ),
-                          Column(
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                ),
-                                onPressed: () async {
-                                  final ctrl = TextEditingController();
-                                  final ok = await showDialog<bool>(
-                                    context: context,
-                                    builder: (_) => AlertDialog(
-                                      title: const Text('Mark as sent'),
-                                      content: TextField(
-                                        controller: ctrl,
-                                        decoration: const InputDecoration(
-                                          labelText: 'Transaction reference',
-                                        ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(context, false),
-                                          child: const Text('Cancel'),
-                                        ),
-                                        ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.pop(context, true),
-                                          child: const Text('Mark'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (ok == true) {
-                                    final tx = ctrl.text.trim();
-                                    if (AppConfig.useBackend) {
-                                      final id = t.id; // id expected
-                                      final uri = Uri.parse(
-                                        '${AppConfig.backendBase}/transfers/$id/mark_sent',
-                                      );
-                                      final sp =
-                                          await SharedPreferences.getInstance();
-                                      final token = sp.getString('jwt');
-                                      final headers = token != null
-                                          ? {'Authorization': 'Bearer $token'}
-                                          : null;
-                                      final prefs = await http.post(
-                                        uri,
-                                        body: {'txRef': tx},
-                                        headers: headers,
-                                      );
-                                      if (prefs.statusCode == 200) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Marked sent'),
-                                          ),
-                                        );
-                                        await LocalDb.instance.logAudit(
-                                          'transfer_marked_sent',
-                                          t.id.toString(),
-                                        );
-                                        setState(() => _load());
-                                      } else {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Failed: ${prefs.statusCode}',
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    } else {
-                                      final db =
-                                          await LocalDb.instance.database;
-                                      await db.update(
-                                        'transfers',
-                                        {'status': 'sent', 'txRef': tx},
-                                        where: 'id = ?',
-                                        whereArgs: [t.id],
-                                      );
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Marked sent locally'),
-                                        ),
-                                      );
-                                      await LocalDb.instance.logAudit(
-                                        'transfer_marked_sent',
-                                        t.id.toString(),
-                                      );
-                                      setState(() => _load());
-                                    }
-                                  }
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              IconButton(
-                                icon: const Icon(Icons.more_vert),
-                                onPressed: () {},
-                              ),
-                            ],
                           ),
                         ],
                       ),
@@ -488,7 +397,13 @@ class _AdminScreenState extends State<AdminScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.dashboard, size: 72, color: Colors.indigo.shade200),
+            Icon(
+              Icons.dashboard,
+              size: 72,
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withAlpha((0.2 * 255).toInt()),
+            ),
             const SizedBox(height: 12),
             Text(
               title,
@@ -498,12 +413,287 @@ class _AdminScreenState extends State<AdminScreen>
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.black54),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _markTransferSent(Transfer t) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Mark as sent'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'Transaction reference'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Mark'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final tx = ctrl.text.trim();
+    if (AppConfig.useBackend) {
+      final id = t.id;
+      final uri = Uri.parse('${AppConfig.backendBase}/transfers/$id/mark_sent');
+      final sp = await SharedPreferences.getInstance();
+      final token = sp.getString('jwt');
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
+      final prefs = await http.post(uri, body: {'txRef': tx}, headers: headers);
+      if (prefs.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Marked sent')));
+        await LocalDb.instance.logAudit(
+          'transfer_marked_sent',
+          t.id.toString(),
+        );
+        setState(() => _load());
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: ${prefs.statusCode}')));
+      }
+    } else {
+      final db = await LocalDb.instance.database;
+      await db.update(
+        'transfers',
+        {'status': 'sent', 'txRef': tx},
+        where: 'id = ?',
+        whereArgs: [t.id],
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Marked sent locally')));
+      await LocalDb.instance.logAudit('transfer_marked_sent', t.id.toString());
+      setState(() => _load());
+    }
+  }
+
+  Future<void> _confirmAndDeleteTransfer(Transfer t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete transfer'),
+        content: const Text('Delete this transfer? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // If backend mode, call server delete endpoint
+    if (AppConfig.useBackend) {
+      if (kIsWeb) {
+        // Web + backend: still call backend over HTTP
+      }
+      try {
+        final sp = await SharedPreferences.getInstance();
+        final token = sp.getString('jwt');
+        final headers = token != null
+            ? {'Authorization': 'Bearer $token'}
+            : null;
+        final uri = Uri.parse('${AppConfig.backendBase}/transfers/${t.id}');
+        final resp = await http.delete(uri, headers: headers);
+        if (resp.statusCode == 200 || resp.statusCode == 204) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Deleted')));
+          await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
+          setState(() => _load());
+          return;
+        } else {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Delete failed: ${resp.statusCode}')),
+          );
+          return;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+        return;
+      }
+    }
+
+    // Local mode (not backend)
+    if (kIsWeb) {
+      // No sqlite on web: simulate delete
+      await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Deleted (web)')));
+      setState(() => _load());
+      return;
+    }
+    try {
+      final db = await LocalDb.instance.database;
+      await db.delete('transfers', where: 'id = ?', whereArgs: [t.id]);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Deleted')));
+      await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
+      setState(() => _load());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+    }
+  }
+
+  Future<void> _showEditTransferDialog(Transfer t) async {
+    final agentCtrl = TextEditingController(text: t.agentName);
+    final receiverCtrl = TextEditingController(text: t.receiverNumber);
+    final amountCtrl = TextEditingController(text: t.amount.toString());
+    final txCtrl = TextEditingController(text: t.txRef ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit transfer'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: agentCtrl,
+                decoration: const InputDecoration(labelText: 'Agent name'),
+              ),
+              TextField(
+                controller: receiverCtrl,
+                decoration: const InputDecoration(labelText: 'Receiver number'),
+              ),
+              TextField(
+                controller: amountCtrl,
+                decoration: const InputDecoration(labelText: 'Amount'),
+                keyboardType: TextInputType.number,
+              ),
+              TextField(
+                controller: txCtrl,
+                decoration: const InputDecoration(labelText: 'Transaction ref'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final updatedMap = t.toMap();
+    updatedMap['agentName'] = agentCtrl.text.trim();
+    updatedMap['receiverNumber'] = receiverCtrl.text.trim();
+    updatedMap['amount'] = double.tryParse(amountCtrl.text) ?? t.amount;
+    updatedMap['txRef'] = txCtrl.text.trim();
+    // Send update to backend or local DB
+    if (AppConfig.useBackend) {
+      try {
+        final sp = await SharedPreferences.getInstance();
+        final token = sp.getString('jwt');
+        final headers = token != null
+            ? {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+              }
+            : {'Content-Type': 'application/json'};
+        final uri = Uri.parse('${AppConfig.backendBase}/transfers/${t.id}');
+        final resp = await http.put(
+          uri,
+          headers: headers,
+          body: jsonEncode(updatedMap),
+        );
+        if (resp.statusCode == 200) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Updated')));
+          await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
+          setState(() => _load());
+          return;
+        } else {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Update failed: ${resp.statusCode}')),
+          );
+          return;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+        return;
+      }
+    }
+
+    // Local DB update
+    try {
+      if (kIsWeb) {
+        // No sqlite: simulate update
+        await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Updated (web)')));
+        setState(() => _load());
+        return;
+      }
+      final db = await LocalDb.instance.database;
+      await db.update(
+        'transfers',
+        updatedMap,
+        where: 'id = ?',
+        whereArgs: [t.id],
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Updated')));
+      await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
+      setState(() => _load());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+    }
   }
 
   Widget _settingsTab() {
@@ -834,6 +1024,7 @@ class _AdminScreenState extends State<AdminScreen>
     } catch (_) {
       // fallback: do nothing (could persist to backend later)
     }
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -1380,6 +1571,7 @@ class _AdminScreenState extends State<AdminScreen>
                                 'notification_deleted',
                                 t['name'] ?? '',
                               );
+                              if (!mounted) return;
                               setState(() {});
                             }
                           },
@@ -1516,16 +1708,160 @@ class _AdminScreenState extends State<AdminScreen>
             insets: EdgeInsets.symmetric(horizontal: 16.0),
           ),
           indicatorSize: TabBarIndicatorSize.label,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          tabs: const [
-            Tab(icon: Icon(Icons.swap_horiz), text: 'Transfers'),
-            Tab(icon: Icon(Icons.people), text: 'Recipients'),
-            Tab(icon: Icon(Icons.store), text: 'Agents'),
-            Tab(icon: Icon(Icons.person), text: 'Users'),
-            Tab(icon: Icon(Icons.assessment), text: 'Reports'),
-            Tab(icon: Icon(Icons.settings), text: 'Settings'),
-            Tab(icon: Icon(Icons.notifications), text: 'Notifications'),
-            Tab(icon: Icon(Icons.history), text: 'Audit Log'),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          tabs: [
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.swap_horiz, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Transfers',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.people, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Recipients',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.store, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Agents',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.person, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Users',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.assessment, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Reports',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.settings, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Settings',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.notifications, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Notifications',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.history, size: 16),
+                  const SizedBox(height: 2),
+                  const SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Audit Log',
+                      style: TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

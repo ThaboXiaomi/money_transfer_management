@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:money_transfer_management/screens/role_selection.dart';
 import 'package:money_transfer_management/screens/dashboard.dart';
 import 'package:money_transfer_management/screens/transfer_list.dart';
@@ -22,10 +21,18 @@ import 'package:money_transfer_management/screens/refunds.dart';
 import 'package:money_transfer_management/screens/bulk_import.dart';
 import 'package:money_transfer_management/screens/support.dart';
 import 'package:money_transfer_management/services/app_init.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:money_transfer_management/services/config.dart';
+import 'package:money_transfer_management/theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Prevent google_fonts from trying to fetch fonts at runtime on devices
+  // (avoids network/TLS handshake failures on some devices/networks).
+  // The GoogleFonts.config object is final; set the flag on it instead of
+  // reassigning the entire config object.
+  GoogleFonts.config.allowRuntimeFetching = false;
+
   // initialize AppConfig (sets AppConfig.backendBase based on platform)
   AppInit.init().then((_) {
     // debug log the computed backend URL and start the app
@@ -40,37 +47,13 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base = ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      useMaterial3: true,
-    );
-
     return ValueListenableBuilder<bool>(
       valueListenable: AppConfig.themeNotifier,
       builder: (context, dark, _) {
         return MaterialApp(
           title: 'Giant Money Transfer',
-          theme: base.copyWith(
-            textTheme: GoogleFonts.interTextTheme(base.textTheme),
-            elevatedButtonTheme: ElevatedButtonThemeData(
-              style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  vertical: 14,
-                  horizontal: 20,
-                ),
-              ),
-            ),
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.indigo,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-          ),
+          theme: AppTheme.lightTheme(),
+          darkTheme: AppTheme.darkTheme(),
           themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           home: const RoleSelectionScreen(),
           routes: {

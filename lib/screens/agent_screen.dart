@@ -116,9 +116,60 @@ class _AgentScreenState extends State<AgentScreen>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(text: 'Send', icon: Icon(Icons.send)),
-            Tab(text: 'History', icon: Icon(Icons.history)),
-            Tab(text: 'Profile', icon: Icon(Icons.person)),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.send, size: 16),
+                  SizedBox(height: 2),
+                  SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Send',
+                      style: TextStyle(fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, size: 16),
+                  SizedBox(height: 2),
+                  SizedBox(
+                    height: 14,
+                    child: Text(
+                      'History',
+                      style: TextStyle(fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.person, size: 16),
+                  SizedBox(height: 2),
+                  SizedBox(
+                    height: 14,
+                    child: Text(
+                      'Profile',
+                      style: TextStyle(fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

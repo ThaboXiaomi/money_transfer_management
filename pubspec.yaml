@@ -42,6 +42,7 @@ dependencies:
   csv: ^5.0.0
   path_provider: ^2.0.14
   google_fonts: ^4.0.3
+  package_info_plus: ^4.0.0
 
 dev_dependencies:
   flutter_test:
