@@ -71,6 +71,7 @@ flutter:
 
   assets:
   - assets/logo.jpg
+  - assets/backend_override.txt
 
 # Configuration for flutter_launcher_icons. Run:
 # flutter pub get ; flutter pub run flutter_launcher_icons:main

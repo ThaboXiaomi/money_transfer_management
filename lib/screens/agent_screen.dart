@@ -52,7 +52,10 @@ class _AgentScreenState extends State<AgentScreen>
   Future pickImage() async {
     final picker = ImagePicker();
     final x = await picker.pickImage(source: ImageSource.gallery);
-    if (x != null) setState(() => _image = File(x.path));
+    if (x != null) {
+      if (!mounted) return;
+      setState(() => _image = File(x.path));
+    }
   }
 
   double computeCharge(double amount) {
@@ -91,20 +94,31 @@ class _AgentScreenState extends State<AgentScreen>
           destination: _destinationController.text.trim(),
           txRef: _txRefController.text.trim(),
         );
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Uploaded to backend')));
+        if (!mounted) return;
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Uploaded to backend')));
+        }
       } catch (e) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+        if (!mounted) return;
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+        }
       }
     } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Transfer saved locally')));
+      if (!mounted) return;
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Transfer saved locally')));
+      }
     }
+    if (!mounted) return;
     _formKey.currentState!.reset();
+    if (!mounted) return;
     setState(() => _image = null);
   }
 

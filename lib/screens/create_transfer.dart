@@ -35,7 +35,10 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
   Future<void> _pickImage() async {
     final p = ImagePicker();
     final x = await p.pickImage(source: ImageSource.gallery, imageQuality: 70);
-    if (x != null) setState(() => _screenshotPath = x.path);
+    if (x != null) {
+      if (!mounted) return;
+      setState(() => _screenshotPath = x.path);
+    }
   }
 
   Future<void> _submit() async {
@@ -66,6 +69,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Transfer uploaded')));
+        if (!mounted) return;
         Navigator.pop(context);
       } else {
         await LocalDb.instance.createTransfer(t);
@@ -73,6 +77,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Transfer saved locally')));
+        if (!mounted) return;
         Navigator.pop(context);
       }
     } catch (e) {

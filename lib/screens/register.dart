@@ -27,6 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // server-side pre-check (if backend available)
     if (AppConfig.useBackend) {
       final s = await ApiService.passwordStrength(_pass.text);
+      if (!mounted) return;
       if (s != null && s < AppConfig.passwordMinStrength) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -56,11 +57,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _loading = true);
     try {
       await ApiService.register(_user.text.trim(), _pass.text.trim(), 'agent');
+      if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Register failed: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Register failed: $e')));
+      }
     } finally {
       setState(() => _loading = false);
     }

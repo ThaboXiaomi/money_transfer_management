@@ -21,25 +21,50 @@ import 'package:money_transfer_management/screens/refunds.dart';
 import 'package:money_transfer_management/screens/bulk_import.dart';
 import 'package:money_transfer_management/screens/support.dart';
 import 'package:money_transfer_management/services/app_init.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:money_transfer_management/services/config.dart';
 import 'package:money_transfer_management/theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Prevent google_fonts from trying to fetch fonts at runtime on devices
-  // (avoids network/TLS handshake failures on some devices/networks).
-  // The GoogleFonts.config object is final; set the flag on it instead of
-  // reassigning the entire config object.
-  GoogleFonts.config.allowRuntimeFetching = false;
+  // On native platforms disable runtime fetching to avoid network/TLS issues.
+  // On web, either bundle fonts via assets or allow runtime fetching.
+  // Enable runtime fetching so GoogleFonts can load fonts when they are not
+  // bundled in app assets. If you prefer to disable it (to avoid TLS issues
+  // on some devices), bundle the font files and set this to false.
+  GoogleFonts.config.allowRuntimeFetching = true;
+
+  // Try to read an optional asset file 'assets/backend_override.txt' (correct
+  // path) which can contain a single line with the backend base URL.
+  // If the asset isn't present the loader will throw; we swallow and return
+  // null so no 404s bubble up to the web console.
+  Future<String?> _readOverride() async {
+    try {
+      final s = await rootBundle.loadString('assets/backend_override.txt');
+      final t = s.trim();
+      return t.isEmpty ? null : t;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // initialize AppConfig (sets AppConfig.backendBase based on platform)
-  AppInit.init().then((_) {
-    // debug log the computed backend URL and start the app
-    // ignore: avoid_print
-    print('Backend base -> ${AppConfig.backendBase}');
-    runApp(const MyApp());
-  });
+  _readOverride()
+      .then((override) async {
+        if (override != null) {
+          await AppInit.init(overrideBackend: override);
+        } else {
+          await AppInit.init();
+        }
+      })
+      .then((_) {
+        // debug log the computed backend URL and start the app
+        // ignore: avoid_print
+        print('Backend base -> ${AppConfig.backendBase}');
+        runApp(const MyApp());
+      });
 }
 
 class MyApp extends StatelessWidget {

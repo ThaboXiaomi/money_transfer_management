@@ -11,6 +11,7 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import '../services/platform_file.dart';
+import '../services/app_init.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -56,23 +57,29 @@ class _AdminScreenState extends State<AdminScreen>
       if (prefs.statusCode == 200) {
         final bytes = prefs.bodyBytes;
         if (kIsWeb) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV ready (web): saved on server')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('CSV ready (web): saved on server')),
+            );
+          }
         } else {
           final dir = await getTemporaryDirectory();
           if (!mounted) return;
           final filename =
               'transfers_${DateTime.now().millisecondsSinceEpoch}.csv';
           final path = pf_writeFileBytesSync(dir.path, filename, bytes);
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('CSV saved to $path')));
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('CSV saved to $path')));
+          }
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: ${prefs.statusCode}')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Export failed: ${prefs.statusCode}')),
+          );
+        }
       }
     } else {
       final list = await LocalDb.instance.readAll();
@@ -446,6 +453,7 @@ class _AdminScreenState extends State<AdminScreen>
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     final tx = ctrl.text.trim();
     if (AppConfig.useBackend) {
       final id = t.id;
@@ -456,9 +464,11 @@ class _AdminScreenState extends State<AdminScreen>
       final prefs = await http.post(uri, body: {'txRef': tx}, headers: headers);
       if (prefs.statusCode == 200) {
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Marked sent')));
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Marked sent')));
+        }
         await LocalDb.instance.logAudit(
           'transfer_marked_sent',
           t.id.toString(),
@@ -466,9 +476,11 @@ class _AdminScreenState extends State<AdminScreen>
         setState(() => _load());
       } else {
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed: ${prefs.statusCode}')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed: ${prefs.statusCode}')),
+          );
+        }
       }
     } else {
       final db = await LocalDb.instance.database;
@@ -506,6 +518,7 @@ class _AdminScreenState extends State<AdminScreen>
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     // If backend mode, call server delete endpoint
     if (AppConfig.useBackend) {
       if (kIsWeb) {
@@ -521,17 +534,21 @@ class _AdminScreenState extends State<AdminScreen>
         final resp = await http.delete(uri, headers: headers);
         if (resp.statusCode == 200 || resp.statusCode == 204) {
           if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Deleted')));
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Deleted')));
+          }
           await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
           setState(() => _load());
           return;
         } else {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Delete failed: ${resp.statusCode}')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Delete failed: ${resp.statusCode}')),
+            );
+          }
           return;
         }
       } catch (e) {
@@ -548,9 +565,11 @@ class _AdminScreenState extends State<AdminScreen>
       // No sqlite on web: simulate delete
       await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted (web)')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Deleted (web)')));
+      }
       setState(() => _load());
       return;
     }
@@ -558,9 +577,11 @@ class _AdminScreenState extends State<AdminScreen>
       final db = await LocalDb.instance.database;
       await db.delete('transfers', where: 'id = ?', whereArgs: [t.id]);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Deleted')));
+      }
       await LocalDb.instance.logAudit('transfer_deleted', t.id.toString());
       setState(() => _load());
     } catch (e) {
@@ -617,6 +638,7 @@ class _AdminScreenState extends State<AdminScreen>
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     final updatedMap = t.toMap();
     updatedMap['agentName'] = agentCtrl.text.trim();
     updatedMap['receiverNumber'] = receiverCtrl.text.trim();
@@ -641,17 +663,21 @@ class _AdminScreenState extends State<AdminScreen>
         );
         if (resp.statusCode == 200) {
           if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Updated')));
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Updated')));
+          }
           await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
           setState(() => _load());
           return;
         } else {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Update failed: ${resp.statusCode}')),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Update failed: ${resp.statusCode}')),
+            );
+          }
           return;
         }
       } catch (e) {
@@ -669,9 +695,11 @@ class _AdminScreenState extends State<AdminScreen>
         // No sqlite: simulate update
         await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Updated (web)')));
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Updated (web)')));
+        }
         setState(() => _load());
         return;
       }
@@ -683,9 +711,11 @@ class _AdminScreenState extends State<AdminScreen>
         whereArgs: [t.id],
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Updated')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Updated')));
+      }
       await LocalDb.instance.logAudit('transfer_updated', t.id.toString());
       setState(() => _load());
     } catch (e) {
@@ -814,6 +844,101 @@ class _AdminScreenState extends State<AdminScreen>
                         },
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Backend override controls: allow runtime editing and detection
+                  Builder(
+                    builder: (ctx) {
+                      final backendCtrl = TextEditingController(
+                        text: AppConfig.backendBase,
+                      );
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Backend',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: backendCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Backend base URL',
+                              helperText: 'e.g. http://192.168.1.100:8000',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              ElevatedButton(
+                                onPressed: () async {
+                                  final val = backendCtrl.text.trim();
+                                  if (val.isEmpty) {
+                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Enter a backend URL'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  AppInit.setBackendBase(val);
+                                  setState(() {});
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Backend saved'),
+                                    ),
+                                  );
+                                },
+                                child: const Text('Save'),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                onPressed: () async {
+                                  // Re-run detection/probe (clears nothing, tries available candidates)
+                                  await AppInit.init();
+                                  setState(() {});
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Re-probed backend (see logs)',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: const Text('Detect'),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                onPressed: () async {
+                                  try {
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
+                                    await prefs.remove('backendOverride');
+                                  } catch (_) {}
+                                  await AppInit.init();
+                                  setState(() {});
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Cleared override and re-probed',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: const Text('Clear Override'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   Card(
                     child: Padding(
@@ -998,6 +1123,7 @@ class _AdminScreenState extends State<AdminScreen>
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
     try {
       final db = await LocalDb.instance.database;
       if (existing == null) {

@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "com.example.money_transfer_management"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Use the highest Android NDK required by plugins (set explicitly to avoid mismatches).
+    // See Flutter output recommending ndkVersion = "27.0.12077973".
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
