@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../services/app_init.dart';
 import '../models/transfer.dart';
 import '../services/local_db.dart';
 import '../services/config.dart';
@@ -127,6 +128,39 @@ class _AgentScreenState extends State<AgentScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Agent Portal'),
+        actions: [
+          IconButton(
+            tooltip: 'Logout',
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Logout'),
+                  content: const Text('Are you sure you want to log out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true) return;
+              await AppInit.logout();
+              if (!mounted) return;
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                '/role-selection',
+                (r) => false,
+              );
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

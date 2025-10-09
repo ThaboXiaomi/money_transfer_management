@@ -35,6 +35,18 @@ app.mount('/uploads', StaticFiles(directory=UPLOAD_DIR), name='uploads')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 os.makedirs(STATIC_DIR, exist_ok=True)
 
+# Serve the Flutter web assets (if the web build or dev server files are
+# placed alongside the backend). This makes requests like
+# GET /assets/backend_override.txt return the file instead of hitting
+# application routes.
+ASSETS_DIR = os.path.normpath(os.path.join(BASE_DIR, '..', 'assets'))
+if os.path.exists(ASSETS_DIR):
+    try:
+        app.mount('/assets', StaticFiles(directory=ASSETS_DIR), name='assets')
+    except Exception:
+        # If mounting fails for any reason, continue without asset mount.
+        pass
+
 @app.get('/')
 def root():
     return {'status': 'ok'}
@@ -244,6 +256,17 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=401, detail='Incorrect username or password')
     access_token = create_access_token({'sub': user['username']}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return {'access_token': access_token, 'token_type': 'bearer'}
+
+
+@app.post('/logout')
+def logout(current_user=Depends(get_optional_current_user)):
+    # No-op endpoint: placeholder for client-initiated logout/revocation.
+    try:
+        user = current_user['username'] if current_user else 'anonymous'
+        print(f"[LOGOUT] requested by {user}")
+    except Exception:
+        pass
+    return {'ok': True}
 
 
 @app.post('/register')

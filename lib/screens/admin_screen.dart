@@ -24,12 +24,16 @@ class _AdminScreenState extends State<AdminScreen>
     with SingleTickerProviderStateMixin {
   late Future<List<Transfer>> _transfers;
   late TabController _tabController;
+  bool? _lastConnOk;
+  int? _lastConnRttMs;
+  String? _lastConnChecked;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 8, vsync: this);
     _load();
+    _loadConnStatus();
   }
 
   @override
@@ -44,6 +48,18 @@ class _AdminScreenState extends State<AdminScreen>
     } else {
       _transfers = LocalDb.instance.readAll();
     }
+  }
+
+  Future<void> _loadConnStatus() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _lastConnOk = sp.getBool('lastConnOk');
+        _lastConnRttMs = sp.getInt('lastConnRttMs');
+        _lastConnChecked = sp.getString('lastConnChecked');
+      });
+    } catch (_) {}
   }
 
   Future<void> _exportCsv() async {
@@ -856,6 +872,35 @@ class _AdminScreenState extends State<AdminScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 8),
+                          if (_lastConnOk != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'Last check: ${_lastConnChecked ?? '-'}',
+                                  ),
+                                  const SizedBox(width: 12),
+                                  if (_lastConnOk == true)
+                                    Text(
+                                      'OK',
+                                      style: TextStyle(
+                                        color: Colors.green.shade700,
+                                      ),
+                                    )
+                                  else
+                                    Text(
+                                      'Failed',
+                                      style: TextStyle(
+                                        color: Colors.red.shade700,
+                                      ),
+                                    ),
+                                  const SizedBox(width: 12),
+                                  if (_lastConnRttMs != null)
+                                    Text('RTT: ${_lastConnRttMs}ms'),
+                                ],
+                              ),
+                            ),
                           const Text(
                             'Backend',
                             style: TextStyle(
@@ -912,6 +957,58 @@ class _AdminScreenState extends State<AdminScreen>
                                   );
                                 },
                                 child: const Text('Detect'),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                onPressed: () async {
+                                  // Test connection to the configured backend.
+                                  final base = AppConfig.backendBase;
+                                  if (base.isEmpty) {
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('No backend configured'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  final testPaths = ['/docs', '/'];
+                                  bool ok = false;
+                                  String msg = '';
+                                  for (final p in testPaths) {
+                                    try {
+                                      final uri = Uri.parse(base + p);
+                                      final resp = await http
+                                          .get(uri)
+                                          .timeout(const Duration(seconds: 5));
+                                      if (!mounted) return;
+                                      if (resp.statusCode >= 200 &&
+                                          resp.statusCode < 400) {
+                                        ok = true;
+                                        msg = 'OK: ${resp.statusCode} ${p}';
+                                        break;
+                                      } else {
+                                        msg = 'HTTP ${resp.statusCode} at ${p}';
+                                      }
+                                    } catch (e) {
+                                      msg = e.toString();
+                                    }
+                                  }
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        ok
+                                            ? 'Connection OK — $msg'
+                                            : 'Connection failed — $msg',
+                                      ),
+                                      backgroundColor: ok
+                                          ? Colors.green.shade700
+                                          : Colors.red.shade700,
+                                    ),
+                                  );
+                                },
+                                child: const Text('Test Connection'),
                               ),
                               const SizedBox(width: 8),
                               OutlinedButton(
@@ -1822,6 +1919,37 @@ class _AdminScreenState extends State<AdminScreen>
             onPressed: () => setState(() => _load()),
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
+          ),
+          IconButton(
+            tooltip: 'Logout',
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Logout'),
+                  content: const Text('Are you sure you want to log out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true) return;
+              await AppInit.logout();
+              if (!mounted) return;
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                '/role-selection',
+                (r) => false,
+              );
+            },
           ),
         ],
         bottom: TabBar(

@@ -43,4 +43,14 @@ class AppInit {
       debugPrint('AppConfig.backendBase manually set -> $url');
     }
   }
+
+  /// Clear authentication and return to an unauthenticated state.
+  static Future<void> logout() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('jwt');
+      // Optionally remove stored user metadata
+      await prefs.remove('currentUser');
+    } catch (_) {}
+  }
 }
