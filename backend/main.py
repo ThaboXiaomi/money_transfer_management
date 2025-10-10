@@ -43,6 +43,11 @@ ASSETS_DIR = os.path.normpath(os.path.join(BASE_DIR, '..', 'assets'))
 if os.path.exists(ASSETS_DIR):
     try:
         app.mount('/assets', StaticFiles(directory=ASSETS_DIR), name='assets')
+        # Some dev setups request /assets/assets/... (double assets); also mount the nested path to be safe
+        try:
+            app.mount('/assets/assets', StaticFiles(directory=ASSETS_DIR), name='assets_nested')
+        except Exception:
+            pass
     except Exception:
         # If mounting fails for any reason, continue without asset mount.
         pass

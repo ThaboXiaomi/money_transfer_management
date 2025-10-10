@@ -1,0 +1,19 @@
+services:
+  - name: money-transfer-backend
+    type: web
+    env: python
+    plan: free
+    workingDirectory: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SECRET_KEY
+        value: change-me-to-a-secure-random-string
+
+  - name: money-transfer-frontend
+    type: web
+    plan: free
+    # Use a Dockerfile that builds the Flutter web app and serves it with nginx.
+    dockerfilePath: web.Dockerfile
+    # No explicit build/start commands needed when using DockerfilePath
+    envVars: []
