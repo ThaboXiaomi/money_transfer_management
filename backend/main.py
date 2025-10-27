@@ -24,9 +24,9 @@ ALGORITHM = 'HS256'
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/token')
 # Optional scheme for endpoints that may be accessed anonymously in dev
-oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl='token', auto_error=False)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl='/token', auto_error=False)
 
 app = FastAPI(title='Money Transfer Backend')
 app.mount('/uploads', StaticFiles(directory=UPLOAD_DIR), name='uploads')
@@ -71,13 +71,27 @@ def favicon():
     raise HTTPException(status_code=404, detail='favicon not found')
 
 # CORS - allow requests from local dev servers / Flutter web during development
+# CORS - allow requests from local dev servers / Flutter web during development
+# When running in a browser, Access-Control-Allow-Credentials cannot be set to
+# true together with a wildcard origin. The app uses bearer tokens in
+# Authorization headers (not cookies), so credentials are not required.
+# allow_credentials=False avoids CORS rejections in web builds. In production
+# set CORS_ORIGINS to a comma-separated list of allowed origins and consider
+# enabling allow_credentials if you use cookies.
+cors_env = os.environ.get('CORS_ORIGINS')
+if cors_env:
+    allow_origins = [o.strip() for o in cors_env.split(',') if o.strip()]
+else:
+    allow_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    # During local development allow common dev origins. Use a narrower list in production.
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allow_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Authorization", "access_token", "content-type"],
+    max_age=600,
 )
 
 
