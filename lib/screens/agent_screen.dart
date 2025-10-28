@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/app_init.dart';
@@ -24,7 +25,9 @@ class _AgentScreenState extends State<AgentScreen>
   final _amountController = TextEditingController();
   final _destinationController = TextEditingController();
   final _txRefController = TextEditingController();
-  File? _image;
+  // Keep picked image as XFile and in-memory bytes so we can support web + mobile
+  XFile? _image;
+  Uint8List? _imageBytes;
   late TabController _tabController;
 
   @override
@@ -55,7 +58,11 @@ class _AgentScreenState extends State<AgentScreen>
     final x = await picker.pickImage(source: ImageSource.gallery);
     if (x != null) {
       if (!mounted) return;
-      setState(() => _image = File(x.path));
+      final bytes = await x.readAsBytes();
+      setState(() {
+        _image = x;
+        _imageBytes = bytes;
+      });
     }
   }
 
@@ -82,7 +89,8 @@ class _AgentScreenState extends State<AgentScreen>
       amount: amt,
       charge: charge,
       agentFee: agentFee,
-      screenshotPath: _image!.path,
+      // store a filename identifier; on web there is no local filesystem path
+      screenshotPath: _image?.name ?? (_image?.path ?? ''),
     );
 
     await LocalDb.instance.createTransfer(t);
@@ -320,7 +328,9 @@ class _AgentScreenState extends State<AgentScreen>
               const SizedBox(height: 12),
               _image == null
                   ? const Text('No screenshot chosen')
-                  : Image.file(_image!, height: 200),
+                  : (_imageBytes != null
+                        ? Image.memory(_imageBytes!, height: 200)
+                        : const Text('Could not load image')),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

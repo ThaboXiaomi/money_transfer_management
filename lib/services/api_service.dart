@@ -1,6 +1,5 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/config.dart';
@@ -11,6 +10,7 @@ class ApiService {
     Transfer t, {
     String destination = '',
     String txRef = '',
+    Uint8List? screenshotBytes,
   }) async {
     final uri = Uri.parse('${AppConfig.backendBase}/transfers');
     final request = http.MultipartRequest('POST', uri);
@@ -25,12 +25,26 @@ class ApiService {
     request.fields['agentFee'] = t.agentFee.toString();
     if (destination.isNotEmpty) request.fields['destination'] = destination;
     if (txRef.isNotEmpty) request.fields['txRef'] = txRef;
-    if (t.screenshotPath.isNotEmpty) {
+    // Attach screenshot: if bytes are provided (web), use fromBytes; else try fromPath
+    if (screenshotBytes != null) {
+      final filename = t.screenshotPath.isNotEmpty
+          ? t.screenshotPath.split('/').last
+          : 'screenshot.jpg';
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          screenshotBytes,
+          filename: filename,
+        ),
+      );
+    } else if (t.screenshotPath.isNotEmpty) {
       try {
         request.files.add(
           await http.MultipartFile.fromPath('file', t.screenshotPath),
         );
-      } catch (_) {}
+      } catch (_) {
+        // ignore; upload without file
+      }
     }
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt');
@@ -121,6 +135,7 @@ class ApiService {
 
   // best-effort helper used by the exchange rates manager UI; backend may not
   // expose a /rates endpoint so caller should ignore failures.
+  // ignore: unused_element
   static Future<void> _postRate(String pair, double rate) async {
     final uri = Uri.parse('${AppConfig.backendBase}/rates');
     final resp = await http.post(
