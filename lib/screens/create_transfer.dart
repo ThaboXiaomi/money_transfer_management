@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/transfer.dart';
@@ -66,24 +64,23 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
           txRef: t.txRef ?? '',
         );
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Transfer uploaded')));
-        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transfer submitted successfully.')),
+        );
         Navigator.pop(context);
       } else {
         await LocalDb.instance.createTransfer(t);
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Transfer saved locally')));
-        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transfer saved locally.')),
+        );
         Navigator.pop(context);
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not submit transfer: $e')),
+      );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -92,6 +89,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
   Future<void> _loadAgents() async {
     try {
       final rows = await LocalDb.instance.readAgents();
+      if (!mounted) return;
       setState(() {
         _agents = rows;
       });
@@ -119,6 +117,16 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
     _agentFeeCtrl.text = agentFee.toStringAsFixed(2);
   }
 
+  Widget _sectionTitle(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -130,11 +138,13 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
             key: _formKey,
             child: ListView(
               children: [
+                _sectionTitle('Agent & Parties'),
                 if (_useDropdown)
                   DropdownButtonFormField<String>(
                     value: _selectedAgentId,
                     decoration: const InputDecoration(
                       labelText: 'Referring agent',
+                      helperText: 'Pick an existing agent or use manual entry.',
                     ),
                     items: [
                       const DropdownMenuItem(
@@ -207,16 +217,20 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 14),
+                _sectionTitle('Amount Breakdown'),
                 Row(
                   children: [
                     Expanded(
                       child: TextFormField(
                         controller: _amountCtrl,
-                        keyboardType: TextInputType.numberWithOptions(
+                        keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        decoration: const InputDecoration(labelText: 'Amount'),
+                        decoration: const InputDecoration(
+                          labelText: 'Amount',
+                          prefixText: 'R ',
+                        ),
                         validator: (v) => (double.tryParse(v ?? '') ?? 0) <= 0
                             ? 'Invalid amount'
                             : null,
@@ -227,10 +241,13 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                     Expanded(
                       child: TextFormField(
                         controller: _chargeCtrl,
-                        keyboardType: TextInputType.numberWithOptions(
+                        keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        decoration: const InputDecoration(labelText: 'Charge'),
+                        decoration: const InputDecoration(
+                          labelText: 'Charge',
+                          prefixText: 'R ',
+                        ),
                         readOnly: true,
                       ),
                     ),
@@ -239,9 +256,11 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _agentFeeCtrl,
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Agent Fee (30%)',
+                    prefixText: 'R ',
                   ),
                   readOnly: true,
                 ),
@@ -261,13 +280,9 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                               style: TextStyle(color: Colors.black54),
                             ),
                             Text(
-                              'R' +
-                                  (_chargeCtrl.text.isEmpty
-                                      ? '0.00'
-                                      : _chargeCtrl.text),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
+                              'R${_chargeCtrl.text.isEmpty ? '0.00' : _chargeCtrl.text}',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -279,13 +294,9 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                               style: TextStyle(color: Colors.black54),
                             ),
                             Text(
-                              'R' +
-                                  (_agentFeeCtrl.text.isEmpty
-                                      ? '0.00'
-                                      : _agentFeeCtrl.text),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
+                              'R${_agentFeeCtrl.text.isEmpty ? '0.00' : _agentFeeCtrl.text}',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -304,7 +315,7 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                                     double.tryParse(_chargeCtrl.text) ?? 0.0;
                                 final total = amt + charge;
                                 return Text(
-                                  'R' + total.toStringAsFixed(2),
+                                  'R${total.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -317,7 +328,8 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                _sectionTitle('Additional Information'),
                 TextFormField(
                   controller: _destinationCtrl,
                   decoration: const InputDecoration(
@@ -337,13 +349,20 @@ class _CreateTransferScreenState extends State<CreateTransferScreen> {
                     ElevatedButton.icon(
                       onPressed: _pickImage,
                       icon: const Icon(Icons.photo),
-                      label: const Text('Attach screenshot'),
+                      label: const Text('Attach screenshot (optional)'),
                     ),
                     const SizedBox(width: 12),
                     if (_screenshotPath.isNotEmpty)
                       Expanded(
                         child: Text(
                           _screenshotPath.split('/').last,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      )
+                    else
+                      const Expanded(
+                        child: Text(
+                          'No screenshot selected',
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),

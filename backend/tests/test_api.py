@@ -19,7 +19,7 @@ client = TestClient(app)
 
 
 def test_register_login_and_transfer():
-    username = 'testagent'
+    username = f"testagent_{os.getpid()}"
     password = 'Secret1'  # meets policy: uppercase + digit
 
     # register (200 OK or 400 if user already exists)
@@ -65,3 +65,88 @@ def test_register_login_and_transfer():
                 os.remove(file_path)
         except Exception:
             pass
+
+
+def test_transfer_without_file_and_invalid_amount():
+    username = f"testagent_no_file_{os.getpid()}"
+    password = 'Secret1'
+
+    client.post('/register', data={'username': username, 'password': password, 'role': 'agent'})
+    r = client.post('/token', data={'username': username, 'password': password})
+    if r.status_code != 200:
+        assert r.status_code in (200, 401)
+        return
+
+    token = r.json()['access_token']
+    headers = {'Authorization': f'Bearer {token}'}
+
+    no_file_resp = client.post(
+        '/transfers',
+        headers=headers,
+        data={
+            'agentName': username,
+            'senderNumber': '123',
+            'receiverNumber': '456',
+            'amount': '100',
+            'charge': '10',
+            'agentFee': '3',
+        },
+    )
+    assert no_file_resp.status_code == 200
+    assert no_file_resp.json().get('screenshotUrl') is None
+
+    invalid_amount_resp = client.post(
+        '/transfers',
+        headers=headers,
+        data={
+            'agentName': username,
+            'senderNumber': '123',
+            'receiverNumber': '456',
+            'amount': '0',
+            'charge': '10',
+            'agentFee': '3',
+        },
+    )
+    assert invalid_amount_resp.status_code == 400
+    assert 'Amount must be greater than zero' in invalid_amount_resp.text
+
+
+def test_transfer_idempotency_key_replays_same_response():
+    username = f"testagent_idempotency_{os.getpid()}"
+    password = 'Secret1'
+
+    client.post('/register', data={'username': username, 'password': password, 'role': 'agent'})
+    r = client.post('/token', data={'username': username, 'password': password})
+    if r.status_code != 200:
+        assert r.status_code in (200, 401, 429)
+        return
+
+    token = r.json()['access_token']
+    idem = f"idem-{os.getpid()}"
+    headers = {'Authorization': f'Bearer {token}', 'Idempotency-Key': idem}
+    payload = {
+        'agentName': username,
+        'senderNumber': '333',
+        'receiverNumber': '444',
+        'amount': '120',
+        'charge': '12',
+        'agentFee': '3.6',
+    }
+
+    first = client.post('/transfers', headers=headers, data=payload)
+    second = client.post('/transfers', headers=headers, data=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json().get('id') == second.json().get('id')
+
+
+def test_login_rate_limit_eventually_returns_429():
+    username = f"no_such_user_{os.getpid()}"
+    saw_429 = False
+    for _ in range(8):
+        r = client.post('/token', data={'username': username, 'password': 'WrongPass1'})
+        if r.status_code == 429:
+            saw_429 = True
+            break
+    assert saw_429

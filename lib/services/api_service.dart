@@ -1,11 +1,27 @@
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/config.dart';
 import '../models/transfer.dart';
 
 class ApiService {
+  static String _createIdempotencyKey() {
+    final randomPart = Random.secure().nextInt(1 << 32).toRadixString(16);
+    return 'transfer-${DateTime.now().millisecondsSinceEpoch}-$randomPart';
+  }
+
+  static String _errorMessage(http.Response resp, String fallback) {
+    try {
+      final decoded = json.decode(resp.body);
+      if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+        return '$fallback: ${decoded['detail']}';
+      }
+    } catch (_) {}
+    return '$fallback: ${resp.statusCode} ${resp.body}';
+  }
+
   static Future<Map<String, dynamic>> uploadTransfer(
     Transfer t, {
     String destination = '',
@@ -49,12 +65,13 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt');
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Idempotency-Key'] = _createIdempotencyKey();
     final streamed = await request.send();
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       return json.decode(resp.body) as Map<String, dynamic>;
     }
-    throw Exception('Upload failed: ${resp.statusCode} ${resp.body}');
+    throw Exception(_errorMessage(resp, 'Upload failed'));
   }
 
   static Future<List<Transfer>> fetchTransfers() async {
@@ -75,13 +92,14 @@ class ApiService {
           amount: (map['amount'] as num).toDouble(),
           charge: (map['charge'] as num).toDouble(),
           agentFee: (map['agentFee'] as num).toDouble(),
-          screenshotPath:
-              '${AppConfig.backendBase}/uploads/${map['screenshotPath']}',
+          screenshotPath: (map['screenshotPath'] ?? '').toString().isEmpty
+              ? ''
+              : '${AppConfig.backendBase}/uploads/${map['screenshotPath']}',
           status: map['status'] ?? 'pending',
         );
       }).toList();
     }
-    throw Exception('Fetch failed: ${resp.statusCode}');
+    throw Exception(_errorMessage(resp, 'Fetch failed'));
   }
 
   static Future<void> login(String username, String password) async {
@@ -96,7 +114,7 @@ class ApiService {
       await prefs.setString('jwt', m['access_token'] as String);
       return;
     }
-    throw Exception('Login failed: ${resp.statusCode} ${resp.body}');
+    throw Exception(_errorMessage(resp, 'Login failed'));
   }
 
   static Future<void> register(
@@ -112,13 +130,7 @@ class ApiService {
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       return;
     }
-    // try to surface backend detail if present
-    try {
-      final m = json.decode(resp.body) as Map<String, dynamic>;
-      if (m.containsKey('detail'))
-        throw Exception('Register failed: ${m['detail']}');
-    } catch (_) {}
-    throw Exception('Register failed: ${resp.statusCode} ${resp.body}');
+    throw Exception(_errorMessage(resp, 'Register failed'));
   }
 
   static Future<double?> passwordStrength(String password) async {

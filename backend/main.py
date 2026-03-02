@@ -1,9 +1,13 @@
 import os
 import sqlite3
+import time
+import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta
+from threading import Lock
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Response, Body, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,9 +23,16 @@ UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_PATH = os.path.join(BASE_DIR, 'transfers.db')
 
-SECRET_KEY = 'change-me-to-a-secure-random-string'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-insecure-change-me')
 ALGORITHM = 'HS256'
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
+LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '900'))
+IDEMPOTENCY_TTL_SECONDS = int(os.environ.get('IDEMPOTENCY_TTL_SECONDS', '1800'))
+
+failed_logins = defaultdict(list)
+idempotency_cache = {}
+security_lock = Lock()
 
 pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/token')
@@ -104,6 +115,10 @@ async def log_requests(request, call_next):
     except Exception:
         pass
     response = await call_next(request)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Cache-Control'] = 'no-store'
     try:
         print(f"[RESP] {request.method} {request.url} -> {response.status_code}")
     except Exception:
@@ -115,6 +130,43 @@ async def log_requests(request, call_next):
 def ping(origin: Optional[str] = None):
     # convenience endpoint for frontend to verify connectivity
     return {'ok': True, 'time': datetime.utcnow().isoformat(), 'note': 'pong'}
+
+
+def _prune_old_attempts(now_ts: float):
+    cutoff = now_ts - LOGIN_WINDOW_SECONDS
+    with security_lock:
+        for username in list(failed_logins.keys()):
+            recent = [ts for ts in failed_logins[username] if ts >= cutoff]
+            if recent:
+                failed_logins[username] = recent
+            else:
+                failed_logins.pop(username, None)
+
+
+def _check_login_rate_limit(username: str):
+    now_ts = time.time()
+    _prune_old_attempts(now_ts)
+    attempts = failed_logins.get(username, [])
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail='Too many failed login attempts. Please try again later.')
+
+
+def _record_failed_login(username: str):
+    with security_lock:
+        failed_logins[username].append(time.time())
+
+
+def _clear_failed_logins(username: str):
+    with security_lock:
+        failed_logins.pop(username, None)
+
+
+def _prune_idempotency_cache(now_ts: float):
+    cutoff = now_ts - IDEMPOTENCY_TTL_SECONDS
+    with security_lock:
+        for key in list(idempotency_cache.keys()):
+            if idempotency_cache[key].get('created', 0) < cutoff:
+                idempotency_cache.pop(key, None)
 
 
 def get_conn():
@@ -136,6 +188,8 @@ def init_db():
     conn.execute('''
     CREATE TABLE IF NOT EXISTS transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        publicId TEXT UNIQUE,
+        idempotencyKey TEXT,
         agentName TEXT,
         senderNumber TEXT,
         receiverNumber TEXT,
@@ -149,6 +203,14 @@ def init_db():
         created_at TEXT
     )
     ''')
+    # lightweight migrations for existing DB files
+    cols = {r['name'] for r in conn.execute("PRAGMA table_info(transfers)").fetchall()}
+    if 'publicId' not in cols:
+        conn.execute('ALTER TABLE transfers ADD COLUMN publicId TEXT')
+    if 'idempotencyKey' not in cols:
+        conn.execute('ALTER TABLE transfers ADD COLUMN idempotencyKey TEXT')
+    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_public_id ON transfers(publicId)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_transfers_idempotency ON transfers(idempotencyKey)')
     conn.execute('''
     CREATE TABLE IF NOT EXISTS recipients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -271,9 +333,13 @@ def startup():
 
 @app.post('/token', response_model=Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(form_data.username, form_data.password)
+    username = form_data.username.strip()
+    _check_login_rate_limit(username)
+    user = authenticate_user(username, form_data.password)
     if not user:
+        _record_failed_login(username)
         raise HTTPException(status_code=401, detail='Incorrect username or password')
+    _clear_failed_logins(username)
     access_token = create_access_token({'sub': user['username']}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return {'access_token': access_token, 'token_type': 'bearer'}
 
@@ -320,6 +386,7 @@ def register(username: str = Form(...), password: str = Form(...), role: str = F
 
 @app.post('/transfers')
 async def create_transfer(
+    request: Request,
     agentName: str = Form(...),
     senderNumber: str = Form(...),
     receiverNumber: str = Form(...),
@@ -328,26 +395,60 @@ async def create_transfer(
     agentFee: float = Form(...),
     destination: Optional[str] = Form(''),
     txRef: Optional[str] = Form(''),
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     current_user=Depends(get_current_user),
 ):
-    # save file
-    filename = f"{int(__import__('time').time())}_{file.filename}"
-    dest = os.path.join(UPLOAD_DIR, filename)
-    with open(dest, 'wb') as f:
-        f.write(await file.read())
+    # basic validation to keep transfer records consistent
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail='Amount must be greater than zero')
+    if charge < 0 or agentFee < 0:
+        raise HTTPException(status_code=400, detail='Charge and agent fee cannot be negative')
+    agent_name = agentName.strip()
+    sender_number = senderNumber.strip()
+    receiver_number = receiverNumber.strip()
+    destination_value = (destination or '').strip()
+    tx_ref = (txRef or '').strip()
+
+    if not agent_name or not sender_number or not receiver_number:
+        raise HTTPException(status_code=400, detail='Agent, sender and receiver fields are required')
+
+    idem_key = ''
+    if request is not None:
+        idem_key = (request.headers.get('Idempotency-Key') or '').strip()
+
+    now_ts = time.time()
+    _prune_idempotency_cache(now_ts)
+    if idem_key:
+        cached = idempotency_cache.get(idem_key)
+        if cached:
+            return cached['response']
+
+    filename = ''
+    # save file when provided
+    if file is not None and file.filename:
+        original_name = os.path.basename(file.filename).replace(' ', '_')
+        filename = f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{original_name}"
+        dest = os.path.join(UPLOAD_DIR, filename)
+        with open(dest, 'wb') as f:
+            f.write(await file.read())
 
     conn = get_conn()
     cur = conn.cursor()
     now = datetime.utcnow().isoformat()
+    public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
     cur.execute(
-        'INSERT INTO transfers (agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        (agentName, senderNumber, receiverNumber, amount, charge, agentFee, filename, 'pending', destination, txRef, now),
+        'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        (public_id, idem_key, agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
     )
     conn.commit()
     id_ = cur.lastrowid
     conn.close()
-    return {'id': id_, 'screenshotUrl': f'/uploads/{filename}'}
+    screenshot_url = f'/uploads/{filename}' if filename else None
+    payload = {'id': id_, 'publicId': public_id, 'screenshotUrl': screenshot_url}
+    if idem_key:
+        with security_lock:
+            idempotency_cache[idem_key] = {'created': now_ts, 'response': payload}
+    return payload
 
 
 @app.get('/transfers')
@@ -513,4 +614,3 @@ def export_csv(current_user=Depends(get_optional_current_user)):
             row = [str(r[h]) if r[h] is not None else '' for h in header]
             yield ','.join(row) + '\n'
     return StreamingResponse(iter_csv(), media_type='text/csv')
-
