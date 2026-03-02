@@ -159,11 +159,6 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       onPressed: () => Navigator.pushNamed(context, '/support'),
                       child: const Text('Support'),
                     ),
-                    ElevatedButton(
-                      onPressed: () =>
-                          Navigator.pushNamed(context, '/feature-roadmap'),
-                      child: const Text('150 Features'),
-                    ),
                   ],
                 ),
               ],

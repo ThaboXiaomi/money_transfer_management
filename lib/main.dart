@@ -20,7 +20,6 @@ import 'package:money_transfer_management/screens/roles_editor.dart';
 import 'package:money_transfer_management/screens/refunds.dart';
 import 'package:money_transfer_management/screens/bulk_import.dart';
 import 'package:money_transfer_management/screens/support.dart';
-import 'package:money_transfer_management/screens/feature_roadmap.dart';
 import 'package:money_transfer_management/services/app_init.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_fonts/google_fonts.dart';
@@ -104,7 +103,6 @@ class MyApp extends StatelessWidget {
             '/refunds': (c) => const RefundsScreen(),
             '/bulk-import': (c) => const BulkImportScreen(),
             '/support': (c) => const SupportScreen(),
-            '/feature-roadmap': (c) => const FeatureRoadmapScreen(),
           },
           debugShowCheckedModeBanner: false,
         );
