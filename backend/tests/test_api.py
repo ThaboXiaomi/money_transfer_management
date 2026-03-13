@@ -178,7 +178,7 @@ def test_transfer_idempotency_key_is_scoped_per_user_and_payload():
     }
 
     payload_a = {
-        'agentName': username_a,
+        'agentName': username_b,
         'senderNumber': '900',
         'receiverNumber': '901',
         'amount': '55',
@@ -246,3 +246,52 @@ def test_transfer_idempotency_concurrent_requests_create_one_transfer():
     assert all(resp.status_code == 200 for resp in results)
     ids = [resp.json().get('id') for resp in results]
     assert ids[0] == ids[1]
+
+
+def test_init_db_does_not_backfill_owner_username_from_agent_name():
+    import sqlite3
+    import tempfile
+    from backend import main as backend_main
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        legacy_db = os.path.join(tmpdir, 'legacy_transfers.db')
+        conn = sqlite3.connect(legacy_db)
+        conn.execute(
+            '''
+            CREATE TABLE transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agentName TEXT,
+                senderNumber TEXT,
+                receiverNumber TEXT,
+                amount REAL,
+                charge REAL,
+                agentFee REAL,
+                screenshotPath TEXT,
+                status TEXT,
+                destination TEXT,
+                txRef TEXT,
+                created_at TEXT
+            )
+            '''
+        )
+        conn.execute(
+            "INSERT INTO transfers (agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ('spoofed_user', '111', '222', 10, 1, 0.5, '', 'pending', '', '', '2024-01-01T00:00:00'),
+        )
+        conn.commit()
+        conn.close()
+
+        previous_db_path = backend_main.DB_PATH
+        try:
+            backend_main.DB_PATH = legacy_db
+            backend_main.init_db()
+
+            conn = sqlite3.connect(legacy_db)
+            conn.row_factory = sqlite3.Row
+            migrated = conn.execute('SELECT ownerUsername, agentName FROM transfers LIMIT 1').fetchone()
+            conn.close()
+
+            assert migrated['agentName'] == 'spoofed_user'
+            assert migrated['ownerUsername'] == ''
+        finally:
+            backend_main.DB_PATH = previous_db_path
