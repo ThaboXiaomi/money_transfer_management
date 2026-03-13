@@ -2,6 +2,8 @@ import os
 import sqlite3
 import time
 import uuid
+import hashlib
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from threading import Lock
@@ -167,6 +169,40 @@ def _prune_idempotency_cache(now_ts: float):
         for key in list(idempotency_cache.keys()):
             if idempotency_cache[key].get('created', 0) < cutoff:
                 idempotency_cache.pop(key, None)
+
+
+def _idempotency_scope_key(username: str, idem_key: str) -> str:
+    return f'{username}:{idem_key}'
+
+
+def _build_transfer_payload_hash(
+    agent_name: str,
+    sender_number: str,
+    receiver_number: str,
+    amount: float,
+    charge: float,
+    agent_fee: float,
+    destination_value: str,
+    tx_ref: str,
+) -> str:
+    payload = {
+        'agentName': agent_name,
+        'senderNumber': sender_number,
+        'receiverNumber': receiver_number,
+        'amount': amount,
+        'charge': charge,
+        'agentFee': agent_fee,
+        'destination': destination_value,
+        'txRef': tx_ref,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _transfer_response_payload(row: sqlite3.Row) -> dict:
+    screenshot_path = row['screenshotPath'] if row['screenshotPath'] else ''
+    screenshot_url = f"/uploads/{screenshot_path}" if screenshot_path else None
+    return {'id': row['id'], 'publicId': row['publicId'], 'screenshotUrl': screenshot_url}
 
 
 def get_conn():
@@ -416,12 +452,16 @@ async def create_transfer(
     if request is not None:
         idem_key = (request.headers.get('Idempotency-Key') or '').strip()
 
-    now_ts = time.time()
-    _prune_idempotency_cache(now_ts)
-    if idem_key:
-        cached = idempotency_cache.get(idem_key)
-        if cached:
-            return cached['response']
+    payload_hash = _build_transfer_payload_hash(
+        agent_name,
+        sender_number,
+        receiver_number,
+        amount,
+        charge,
+        agentFee,
+        destination_value,
+        tx_ref,
+    )
 
     filename = ''
     # save file when provided
@@ -433,22 +473,71 @@ async def create_transfer(
             f.write(await file.read())
 
     conn = get_conn()
-    cur = conn.cursor()
-    now = datetime.utcnow().isoformat()
-    public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
-    cur.execute(
-        'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        (public_id, idem_key, agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
-    )
-    conn.commit()
-    id_ = cur.lastrowid
-    conn.close()
-    screenshot_url = f'/uploads/{filename}' if filename else None
-    payload = {'id': id_, 'publicId': public_id, 'screenshotUrl': screenshot_url}
-    if idem_key:
-        with security_lock:
-            idempotency_cache[idem_key] = {'created': now_ts, 'response': payload}
-    return payload
+    try:
+        cur = conn.cursor()
+        now_ts = time.time()
+        _prune_idempotency_cache(now_ts)
+
+        if idem_key:
+            cache_key = _idempotency_scope_key(current_user['username'], idem_key)
+            with security_lock:
+                cached = idempotency_cache.get(cache_key)
+                if cached:
+                    if cached.get('payloadHash') != payload_hash:
+                        raise HTTPException(status_code=409, detail='Idempotency-Key reused with different transfer payload')
+                    return cached['response']
+
+                cur.execute(
+                    'SELECT * FROM transfers WHERE idempotencyKey = ? AND agentName = ? ORDER BY id DESC LIMIT 1',
+                    (idem_key, current_user['username']),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    existing_hash = _build_transfer_payload_hash(
+                        existing['agentName'] or '',
+                        existing['senderNumber'] or '',
+                        existing['receiverNumber'] or '',
+                        float(existing['amount'] or 0),
+                        float(existing['charge'] or 0),
+                        float(existing['agentFee'] or 0),
+                        existing['destination'] or '',
+                        existing['txRef'] or '',
+                    )
+                    if existing_hash != payload_hash:
+                        raise HTTPException(status_code=409, detail='Idempotency-Key reused with different transfer payload')
+                    payload = _transfer_response_payload(existing)
+                    idempotency_cache[cache_key] = {
+                        'created': now_ts,
+                        'payloadHash': payload_hash,
+                        'response': payload,
+                    }
+                    return payload
+
+                now = datetime.utcnow().isoformat()
+                public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
+                cur.execute(
+                    'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (public_id, idem_key, agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
+                )
+                conn.commit()
+                payload = {'id': cur.lastrowid, 'publicId': public_id, 'screenshotUrl': f'/uploads/{filename}' if filename else None}
+                idempotency_cache[cache_key] = {
+                    'created': now_ts,
+                    'payloadHash': payload_hash,
+                    'response': payload,
+                }
+                return payload
+
+        now = datetime.utcnow().isoformat()
+        public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
+        cur.execute(
+            'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (public_id, '', agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
+        )
+        conn.commit()
+        return {'id': cur.lastrowid, 'publicId': public_id, 'screenshotUrl': f'/uploads/{filename}' if filename else None}
+    finally:
+        conn.close()
 
 
 @app.get('/transfers')
