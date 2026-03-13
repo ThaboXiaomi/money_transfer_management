@@ -178,7 +178,7 @@ def test_transfer_idempotency_key_is_scoped_per_user_and_payload():
     }
 
     payload_a = {
-        'agentName': username_a,
+        'agentName': username_b,
         'senderNumber': '900',
         'receiverNumber': '901',
         'amount': '55',

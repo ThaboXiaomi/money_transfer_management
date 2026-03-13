@@ -226,6 +226,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         publicId TEXT UNIQUE,
         idempotencyKey TEXT,
+        ownerUsername TEXT,
         agentName TEXT,
         senderNumber TEXT,
         receiverNumber TEXT,
@@ -245,8 +246,12 @@ def init_db():
         conn.execute('ALTER TABLE transfers ADD COLUMN publicId TEXT')
     if 'idempotencyKey' not in cols:
         conn.execute('ALTER TABLE transfers ADD COLUMN idempotencyKey TEXT')
+    if 'ownerUsername' not in cols:
+        conn.execute('ALTER TABLE transfers ADD COLUMN ownerUsername TEXT')
+        conn.execute("UPDATE transfers SET ownerUsername = COALESCE(ownerUsername, agentName, '')")
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_public_id ON transfers(publicId)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_transfers_idempotency ON transfers(idempotencyKey)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_transfers_owner_idem ON transfers(ownerUsername, idempotencyKey)')
     conn.execute('''
     CREATE TABLE IF NOT EXISTS recipients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -488,7 +493,7 @@ async def create_transfer(
                     return cached['response']
 
                 cur.execute(
-                    'SELECT * FROM transfers WHERE idempotencyKey = ? AND agentName = ? ORDER BY id DESC LIMIT 1',
+                    'SELECT * FROM transfers WHERE idempotencyKey = ? AND ownerUsername = ? ORDER BY id DESC LIMIT 1',
                     (idem_key, current_user['username']),
                 )
                 existing = cur.fetchone()
@@ -516,8 +521,8 @@ async def create_transfer(
                 now = datetime.utcnow().isoformat()
                 public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
                 cur.execute(
-                    'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (public_id, idem_key, agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
+                    'INSERT INTO transfers (publicId,idempotencyKey,ownerUsername,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (public_id, idem_key, current_user['username'], agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
                 )
                 conn.commit()
                 payload = {'id': cur.lastrowid, 'publicId': public_id, 'screenshotUrl': f'/uploads/{filename}' if filename else None}
@@ -531,8 +536,8 @@ async def create_transfer(
         now = datetime.utcnow().isoformat()
         public_id = f"tr_{datetime.utcnow().strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}"
         cur.execute(
-            'INSERT INTO transfers (publicId,idempotencyKey,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-            (public_id, '', agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
+            'INSERT INTO transfers (publicId,idempotencyKey,ownerUsername,agentName,senderNumber,receiverNumber,amount,charge,agentFee,screenshotPath,status,destination,txRef,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (public_id, '', current_user['username'], agent_name, sender_number, receiver_number, amount, charge, agentFee, filename, 'pending', destination_value, tx_ref, now),
         )
         conn.commit()
         return {'id': cur.lastrowid, 'publicId': public_id, 'screenshotUrl': f'/uploads/{filename}' if filename else None}
