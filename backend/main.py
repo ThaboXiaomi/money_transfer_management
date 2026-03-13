@@ -248,7 +248,9 @@ def init_db():
         conn.execute('ALTER TABLE transfers ADD COLUMN idempotencyKey TEXT')
     if 'ownerUsername' not in cols:
         conn.execute('ALTER TABLE transfers ADD COLUMN ownerUsername TEXT')
-        conn.execute("UPDATE transfers SET ownerUsername = COALESCE(ownerUsername, agentName, '')")
+        # Do not backfill from `agentName` because it is client-controlled and
+        # cannot be trusted as transfer ownership for legacy rows.
+        conn.execute("UPDATE transfers SET ownerUsername = '' WHERE ownerUsername IS NULL")
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_public_id ON transfers(publicId)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_transfers_idempotency ON transfers(idempotencyKey)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_transfers_owner_idem ON transfers(ownerUsername, idempotencyKey)')
